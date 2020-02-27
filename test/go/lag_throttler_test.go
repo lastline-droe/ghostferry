@@ -22,7 +22,7 @@ func newThrottlerWithQuery(query string) *ghostferry.LagThrottler {
 		UpdateInterval: "5ms",
 	}
 
-	throttler, err := ghostferry.NewLagThrottler(config)
+	throttler, err := ghostferry.NewLagThrottler(config, "")
 	testhelpers.PanicIfError(err)
 	return throttler
 }
@@ -112,22 +112,22 @@ func TestNewThrottlerConfigErrors(t *testing.T) {
 	}
 
 	config := okConfig
-	_, err := ghostferry.NewLagThrottler(&config)
+	_, err := ghostferry.NewLagThrottler(&config, "")
 	assert.Nil(t, err)
 
 	config = okConfig
 	config.Query = ""
-	_, err = ghostferry.NewLagThrottler(&config)
+	_, err = ghostferry.NewLagThrottler(&config, "")
 	assert.NotNil(t, err)
 
 	config = okConfig
 	config.Connection.Host = ""
-	_, err = ghostferry.NewLagThrottler(&config)
+	_, err = ghostferry.NewLagThrottler(&config, "")
 	assert.NotNil(t, err)
 
 	config = okConfig
 	config.UpdateInterval = "hunter2"
-	_, err = ghostferry.NewLagThrottler(&config)
+	_, err = ghostferry.NewLagThrottler(&config, "")
 	assert.NotNil(t, err)
 }
 

@@ -116,7 +116,7 @@ func (c *DatabaseConfig) Validate() error {
 	return nil
 }
 
-func (c *DatabaseConfig) SqlDB(logger *logrus.Entry) (*sql.DB, error) {
+func (c *DatabaseConfig) SqlDB(logger *logrus.Entry, comment string) (*sql.DB, error) {
 	dbCfg, err := c.MySQLConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build database config: %s", err)
@@ -126,7 +126,7 @@ func (c *DatabaseConfig) SqlDB(logger *logrus.Entry) (*sql.DB, error) {
 		logger.WithField("dsn", MaskedDSN(dbCfg)).Info("connecting to database")
 	}
 
-	return sql.Open("mysql", dbCfg.FormatDSN())
+	return sql.Open("mysql", dbCfg.FormatDSN(), comment)
 }
 
 func (c *DatabaseConfig) assertParamSet(param, value string) error {
@@ -479,6 +479,10 @@ type Config struct {
 	// 2. Use the table's primary key column as the pagination column. Fail if the primary key is not numeric or is a composite key without a FallbackColumn specified.
 	// 3. Use the FallbackColumn pagination column, if configured. Fail if we cannot find this column in the table.
 	CascadingPaginationColumnConfig *CascadingPaginationColumnConfig
+
+	// SQL query comments to differentiate Ghostferry's binlog events
+	// Optional: defaults to empty string (no comments)
+	QueryComment string
 }
 
 func (c *Config) ValidateConfig() error {

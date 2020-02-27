@@ -5,27 +5,27 @@ import (
 	sqlorig "database/sql"
 )
 
-const maintenanceComment = "/*maintenance:ghostferry*/ "
-
 type DB struct {
 	*sqlorig.DB
+	comment string
 }
 
 type Tx struct {
 	*sqlorig.Tx
+	comment string
 }
 
-func Open(driverName, dataSourceName string) (*DB, error) {
+func Open(driverName, dataSourceName, comment string) (*DB, error) {
 	sqlDB, err := sqlorig.Open(driverName, dataSourceName)
-	return &DB{sqlDB}, err
+	return &DB{sqlDB, comment}, err
 }
 
 func (db DB) PrepareContext(ctx context.Context, query string) (*sqlorig.Stmt, error) {
-	return db.DB.PrepareContext(ctx, Comment(query))
+	return db.DB.PrepareContext(ctx, Comment(query, db.comment))
 }
 
 func (db DB) ExecContext(ctx context.Context, query string, args ...interface{}) (sqlorig.Result, error) {
-	return db.DB.ExecContext(ctx, Comment(query), args...)
+	return db.DB.ExecContext(ctx, Comment(query, db.comment), args...)
 }
 
 func (db DB) QueryContext(ctx context.Context, query string, args ...interface{}) (*sqlorig.Rows, error) {
@@ -33,11 +33,11 @@ func (db DB) QueryContext(ctx context.Context, query string, args ...interface{}
 }
 
 func (db DB) Exec(query string, args ...interface{}) (sqlorig.Result, error) {
-	return db.DB.Exec(Comment(query), args...)
+	return db.DB.Exec(Comment(query, db.comment), args...)
 }
 
 func (db DB) Prepare(query string) (*sqlorig.Stmt, error) {
-	return db.DB.Prepare(Comment(query))
+	return db.DB.Prepare(Comment(query, db.comment))
 }
 
 func (db DB) Query(query string, args ...interface{}) (*sqlorig.Rows, error) {
@@ -54,23 +54,23 @@ func (db DB) QueryRowContext(ctx context.Context, query string, args ...interfac
 
 func (db DB) Begin() (*Tx, error) {
 	tx, err := db.DB.Begin()
-	return &Tx{tx}, err
+	return &Tx{tx, db.comment}, err
 }
 
 func (tx Tx) ExecContext(ctx context.Context, query string, args ...interface{}) (sqlorig.Result, error) {
-	return tx.Tx.ExecContext(ctx, Comment(query), args...)
+	return tx.Tx.ExecContext(ctx, Comment(query, tx.comment), args...)
 }
 
 func (tx Tx) Exec(query string, args ...interface{}) (sqlorig.Result, error) {
-	return tx.Tx.Exec(Comment(query), args...)
+	return tx.Tx.Exec(Comment(query, tx.comment), args...)
 }
 
 func (tx Tx) Prepare(query string) (*sqlorig.Stmt, error) {
-	return tx.Tx.Prepare(Comment(query))
+	return tx.Tx.Prepare(Comment(query, tx.comment))
 }
 
 func (tx Tx) PrepareContext(ctx context.Context, query string) (*sqlorig.Stmt, error) {
-	return tx.Tx.PrepareContext(ctx, Comment(query))
+	return tx.Tx.PrepareContext(ctx, Comment(query, tx.comment))
 }
 
 func (tx Tx) QueryContext(ctx context.Context, query string, args ...interface{}) (*sqlorig.Rows, error) {
@@ -89,7 +89,6 @@ func (tx Tx) QueryRow(query string, args ...interface{}) *sqlorig.Row {
 	return tx.Tx.QueryRow(query, args...)
 }
 
-/* SQL query comments are used to differentiate Technical Ghostferry's binlog events from Business binlog events */
-func Comment(query string) string {
-	return maintenanceComment + query
+func Comment(query, comment string) string {
+	return comment + query
 }

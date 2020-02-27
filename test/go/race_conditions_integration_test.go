@@ -16,12 +16,12 @@ func setupSingleEntryTable(f *testhelpers.TestFerry, sourceDB, targetDB *sql.DB)
 	testhelpers.SeedInitialData(targetDB, "gftest", "table1", 0)
 }
 
-func addMaintenanceComments(vs []string) []string {
-	vsm := make([]string, len(vs))
-	for i, v := range vs {
-		vsm[i] = sql.Comment(v)
+func addMaintenanceComments(queries []string, comment string) []string {
+	queriesWithComments := make([]string, len(queries))
+	for i, q := range queries {
+		queriesWithComments[i] = sql.Comment(q, comment)
 	}
-	return vsm
+	return queriesWithComments
 }
 
 func TestSelectUpdateBinlogCopy(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSelectUpdateBinlogCopy(t *testing.T) {
 			}(queries[i])
 		}
 
-		queries = addMaintenanceComments(queries)
+		queries = addMaintenanceComments(queries, testcase.Ferry.QueryComment)
 
 		// Waiting for sure until we can see the queries as they will be
 		// locked due to the SELECT FOR UPDATE that is being performed.
@@ -85,7 +85,7 @@ func TestUpdateBinlogSelectCopy(t *testing.T) {
 func TestMasterChangingBeforeStoppingBinlogStreaming(t *testing.T) {
 	ferry := testhelpers.NewTestFerry()
 
-	sourceDB, err := ferry.Source.SqlDB(nil)
+	sourceDB, err := ferry.Source.SqlDB(nil, ferry.QueryComment)
 	testhelpers.PanicIfError(err)
 	defer sourceDB.Close()
 

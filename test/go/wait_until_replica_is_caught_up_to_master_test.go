@@ -21,9 +21,9 @@ func (s *WaitUntilReplicaIsCaughtUpToMasterSuite) SetupTest() {
 	config := testhelpers.NewTestConfig()
 
 	// We'll setup a fake pt-heartbeat by updating the entries manually.
-	masterDB, err := config.Source.SqlDB(nil)
+	masterDB, err := config.Source.SqlDB(nil, config.QueryComment)
 	s.Require().Nil(err)
-	replicaDB, err := config.Target.SqlDB(nil)
+	replicaDB, err := config.Target.SqlDB(nil, config.QueryComment)
 	s.Require().Nil(err)
 
 	s.w = &ghostferry.WaitUntilReplicaIsCaughtUpToMaster{

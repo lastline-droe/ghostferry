@@ -49,7 +49,7 @@ func NewFerry(config *Config) (*ShardingFerry, error) {
 	var throttler ghostferry.Throttler
 
 	if config.Throttle != nil {
-		throttler, err = ghostferry.NewLagThrottler(config.Throttle)
+		throttler, err = ghostferry.NewLagThrottler(config.Throttle, config.QueryComment)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create throttler: %v", err)
 		}
@@ -256,7 +256,7 @@ func compileRegexps(exps []string) ([]*regexp.Regexp, error) {
 }
 
 func (r *ShardingFerry) initializeWaitUntilReplicaIsCaughtUpToMasterConnection() error {
-	masterDB, err := r.config.SourceReplicationMaster.SqlDB(r.logger)
+	masterDB, err := r.config.SourceReplicationMaster.SqlDB(r.logger, r.Ferry.QueryComment)
 	if err != nil {
 		return err
 	}
@@ -271,7 +271,7 @@ func (r *ShardingFerry) initializeWaitUntilReplicaIsCaughtUpToMasterConnection()
 }
 
 func (r *ShardingFerry) dbConfigIsForReplica(dbConfig *ghostferry.DatabaseConfig) (bool, error) {
-	conn, err := dbConfig.SqlDB(r.logger)
+	conn, err := dbConfig.SqlDB(r.logger, r.Ferry.QueryComment)
 	defer conn.Close()
 	if err != nil {
 		return false, err

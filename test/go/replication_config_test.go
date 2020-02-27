@@ -22,7 +22,7 @@ func (t *ReplicationConfigTestSuite) SetupTest() {
 	var err error
 	t.TestFerry = testhelpers.NewTestFerry()
 	t.Ferry = t.TestFerry.Ferry
-	t.SourceDB, err = t.Ferry.Source.SqlDB(nil)
+	t.SourceDB, err = t.Ferry.Source.SqlDB(nil, t.Ferry.QueryComment)
 	t.Require().Nil(err)
 
 	t.ReplicatedMasterPositionFetcher = &ghostferry.ReplicatedMasterPositionViaCustomQuery{

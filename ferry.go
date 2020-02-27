@@ -303,7 +303,7 @@ func (f *Ferry) Initialize() (err error) {
 
 	// Connect to the source and target databases and check the validity
 	// of the connections
-	f.SourceDB, err = f.Source.SqlDB(f.logger.WithField("dbname", "source"))
+	f.SourceDB, err = f.Source.SqlDB(f.logger.WithField("dbname", "source"), f.Config.QueryComment)
 	if err != nil {
 		f.logger.WithError(err).Error("failed to connect to source database")
 		return err
@@ -321,7 +321,7 @@ func (f *Ferry) Initialize() (err error) {
 		return err
 	}
 
-	f.TargetDB, err = f.Target.SqlDB(f.logger.WithField("dbname", "target"))
+	f.TargetDB, err = f.Target.SqlDB(f.logger.WithField("dbname", "target"), f.Config.QueryComment)
 	if err != nil {
 		f.logger.WithError(err).Error("failed to connect to target database")
 		return err

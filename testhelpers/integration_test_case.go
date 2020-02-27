@@ -49,10 +49,10 @@ func (this *IntegrationTestCase) Setup() {
 	SetupTest()
 
 	var err error
-	this.SourceDB, err = this.Ferry.Source.SqlDB(nil)
+	this.SourceDB, err = this.Ferry.Source.SqlDB(nil, this.Ferry.QueryComment)
 	PanicIfError(err)
 
-	this.TargetDB, err = this.Ferry.Target.SqlDB(nil)
+	this.TargetDB, err = this.Ferry.Target.SqlDB(nil, this.Ferry.QueryComment)
 	PanicIfError(err)
 
 	this.callCustomAction(this.SetupAction)

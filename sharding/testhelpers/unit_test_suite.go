@@ -72,10 +72,10 @@ func (t *ShardingUnitTestSuite) SetupTest() {
 
 	var err error
 	ghostferryConfig := testhelpers.NewTestConfig()
-	t.SourceDB, err = ghostferryConfig.Source.SqlDB(nil)
+	t.SourceDB, err = ghostferryConfig.Source.SqlDB(nil, ghostferryConfig.QueryComment)
 	testhelpers.PanicIfError(err)
 
-	t.TargetDB, err = ghostferryConfig.Target.SqlDB(nil)
+	t.TargetDB, err = ghostferryConfig.Target.SqlDB(nil, ghostferryConfig.QueryComment)
 	testhelpers.PanicIfError(err)
 
 	t.dropTestDbs()

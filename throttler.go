@@ -90,7 +90,7 @@ type LagThrottler struct {
 	interval time.Duration
 }
 
-func NewLagThrottler(config *LagThrottlerConfig) (*LagThrottler, error) {
+func NewLagThrottler(config *LagThrottlerConfig, queryComment string) (*LagThrottler, error) {
 	if config.MaxLag <= 0 {
 		config.MaxLag = 1
 	}
@@ -113,7 +113,7 @@ func NewLagThrottler(config *LagThrottlerConfig) (*LagThrottler, error) {
 	}
 
 	logger := logrus.WithField("tag", "throttler")
-	db, err := config.Connection.SqlDB(logger)
+	db, err := config.Connection.SqlDB(logger, queryComment)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection: %s", err)
 	}

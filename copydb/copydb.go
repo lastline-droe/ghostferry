@@ -123,7 +123,7 @@ func (this *CopydbFerry) ShutdownControlServer() error {
 }
 
 func (this *CopydbFerry) initializeWaitUntilReplicaIsCaughtUpToMasterConnection() error {
-	masterDB, err := this.config.SourceReplicationMaster.SqlDB(logrus.WithField("tag", "copydb"))
+	masterDB, err := this.config.SourceReplicationMaster.SqlDB(logrus.WithField("tag", "copydb"), this.Ferry.QueryComment)
 	if err != nil {
 		return err
 	}
