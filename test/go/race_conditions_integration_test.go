@@ -16,6 +16,14 @@ func setupSingleEntryTable(f *testhelpers.TestFerry, sourceDB, targetDB *sql.DB)
 	testhelpers.SeedInitialData(targetDB, "gftest", "table1", 0)
 }
 
+func addMaintenanceComments(vs []string) []string {
+	vsm := make([]string, len(vs))
+	for i, v := range vs {
+		vsm[i] = sql.Comment(v)
+	}
+	return vsm
+}
+
 func TestSelectUpdateBinlogCopy(t *testing.T) {
 	testcase := testhelpers.IntegrationTestCase{
 		T:           t,
@@ -36,6 +44,8 @@ func TestSelectUpdateBinlogCopy(t *testing.T) {
 				}
 			}(queries[i])
 		}
+
+		queries = addMaintenanceComments(queries)
 
 		// Waiting for sure until we can see the queries as they will be
 		// locked due to the SELECT FOR UPDATE that is being performed.
