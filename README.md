@@ -37,6 +37,8 @@ Features/fixes added in this fork include
 
 - fix [data corruption for binary columns](https://github.com/Shopify/ghostferry/issues/157):
   this fix has not made it into upstream master yet.
+- fix [failure to resume](https://github.com/Shopify/ghostferry/issues/156):
+  this fix has not made it into upstream master yet.
 
 Overview of How it Works
 ------------------------
