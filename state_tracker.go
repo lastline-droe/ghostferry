@@ -5,6 +5,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // StateTracker design
@@ -86,6 +88,7 @@ type StateTracker struct {
 	lastSuccessfulPaginationKeys map[string]uint64
 	completedTables              map[string]bool
 
+	logger            *logrus.Entry
 	iterationSpeedLog *ring.Ring
 }
 
@@ -96,6 +99,7 @@ func NewStateTracker(speedLogCount int) *StateTracker {
 
 		lastSuccessfulPaginationKeys: make(map[string]uint64),
 		completedTables:              make(map[string]bool),
+		logger:                       logrus.WithField("tag", "state_tracker"),
 		iterationSpeedLog:            newSpeedLogRing(speedLogCount),
 	}
 }
@@ -115,6 +119,7 @@ func (s *StateTracker) UpdateLastWrittenBinlogPosition(pos BinlogPosition) {
 	s.BinlogRWMutex.Lock()
 	defer s.BinlogRWMutex.Unlock()
 
+	s.logger.Debugf("updating last written binlog position: %s", pos)
 	s.lastWrittenBinlogPosition = pos
 }
 
@@ -122,12 +127,15 @@ func (s *StateTracker) UpdateLastStoredBinlogPositionForInlineVerifier(pos Binlo
 	s.BinlogRWMutex.Lock()
 	defer s.BinlogRWMutex.Unlock()
 
+	s.logger.Debugf("updating last stored binlog position for inline verifier: %s", pos)
 	s.lastStoredBinlogPositionForInlineVerifier = pos
 }
 
 func (s *StateTracker) UpdateLastSuccessfulPaginationKey(table string, paginationKey uint64) {
 	s.CopyRWMutex.Lock()
 	defer s.CopyRWMutex.Unlock()
+
+	s.logger.WithField("table", table).Debugf("updating table last successful pagination key: %d", paginationKey)
 
 	deltaPaginationKey := paginationKey - s.lastSuccessfulPaginationKeys[table]
 	s.lastSuccessfulPaginationKeys[table] = paginationKey
@@ -156,6 +164,7 @@ func (s *StateTracker) MarkTableAsCompleted(table string) {
 	s.CopyRWMutex.Lock()
 	defer s.CopyRWMutex.Unlock()
 
+	s.logger.WithField("table", table).Debug("marking table as completed")
 	s.completedTables[table] = true
 }
 
