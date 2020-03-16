@@ -61,6 +61,8 @@ Features/fixes added in this fork include
   database states that are not recoverable.
 - use `DBReadRetries` configuration setting also for retrying reading from the
   binlog server (instead of using a hardcoded retry limit of 5).
+- more robust [handling of bigint column values](https://github.com/Shopify/ghostferry/issues/165):
+  this fix has not made it into upstream master yet.
 
 Overview of How it Works
 ------------------------
