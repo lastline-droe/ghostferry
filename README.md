@@ -39,6 +39,18 @@ Features/fixes added in this fork include
   this fix has not made it into upstream master yet.
 - fix [failure to resume](https://github.com/Shopify/ghostferry/issues/156):
   this fix has not made it into upstream master yet.
+- allow specifying [table creation order](https://github.com/Shopify/ghostferry/issues/161):
+  `Ghostferry` does not allow copying tables using *foreign key constraints*,
+  because it copies data in batches, which is likely to violate constraints,
+  leading to failures during the copy phase.  
+  The forked version allows specifying the order in which tables need to be
+  created in the target database. This allows working around constraints in the
+  setup phase. Additionally disabling foreign key constraint enforcement on the
+  target database session/connection allows working around constraints during
+  the copy phase.  
+  Note that an *incomplete* execution of `Ghostferry`  will leave the database in
+  an inconsistent state until the copy is resumed and completed.
+
 
 Overview of How it Works
 ------------------------
