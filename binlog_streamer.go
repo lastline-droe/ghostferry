@@ -5,8 +5,9 @@ import (
 	"crypto/tls"
 	sqlorig "database/sql"
 	"fmt"
-	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"time"
+
+	sql "github.com/Shopify/ghostferry/sqlwrapper"
 
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/siddontang/go-mysql/replication"
@@ -37,9 +38,9 @@ type BinlogStreamer struct {
 	eventListeners []func([]DMLEvent) error
 }
 
-func (s *BinlogStreamer) ensureLogger() {
+func (s *BinlogStreamer) ensureLogger(tag string) {
 	if s.logger == nil {
-		s.logger = logrus.WithField("tag", "binlog_streamer")
+		s.logger = logrus.WithField("tag", fmt.Sprintf("%s_binlog_streamer", tag))
 	}
 }
 
@@ -77,8 +78,8 @@ func (s *BinlogStreamer) createBinlogSyncer() error {
 	return nil
 }
 
-func (s *BinlogStreamer) ConnectBinlogStreamerToMysql() (mysql.Position, error) {
-	s.ensureLogger()
+func (s *BinlogStreamer) ConnectBinlogStreamerToMysql(tag string) (mysql.Position, error) {
+	s.ensureLogger(tag)
 
 	currentPosition, err := ShowMasterStatusBinlogPosition(s.DB)
 	if err != nil {
@@ -86,11 +87,11 @@ func (s *BinlogStreamer) ConnectBinlogStreamerToMysql() (mysql.Position, error) 
 		return mysql.Position{}, err
 	}
 
-	return s.ConnectBinlogStreamerToMysqlFrom(currentPosition)
+	return s.ConnectBinlogStreamerToMysqlFrom(currentPosition, tag)
 }
 
-func (s *BinlogStreamer) ConnectBinlogStreamerToMysqlFrom(startFromBinlogPosition mysql.Position) (mysql.Position, error) {
-	s.ensureLogger()
+func (s *BinlogStreamer) ConnectBinlogStreamerToMysqlFrom(startFromBinlogPosition mysql.Position, tag string) (mysql.Position, error) {
+	s.ensureLogger(tag)
 
 	err := s.createBinlogSyncer()
 	if err != nil {
@@ -102,6 +103,8 @@ func (s *BinlogStreamer) ConnectBinlogStreamerToMysqlFrom(startFromBinlogPositio
 	s.logger.WithFields(logrus.Fields{
 		"file": s.lastStreamedBinlogPosition.Name,
 		"pos":  s.lastStreamedBinlogPosition.Pos,
+		"host": s.DBConfig.Host,
+		"port": s.DBConfig.Port,
 	}).Info("starting binlog streaming")
 
 	s.binlogStreamer, err = s.binlogSyncer.StartSync(s.lastStreamedBinlogPosition)
@@ -113,8 +116,8 @@ func (s *BinlogStreamer) ConnectBinlogStreamerToMysqlFrom(startFromBinlogPositio
 	return s.lastStreamedBinlogPosition, err
 }
 
-func (s *BinlogStreamer) Run() {
-	s.ensureLogger()
+func (s *BinlogStreamer) Run(tag string) {
+	s.ensureLogger(tag)
 
 	defer func() {
 		s.logger.Info("exiting binlog streamer")
@@ -184,6 +187,7 @@ func (s *BinlogStreamer) Run() {
 			// so there's no way to handle this for us.
 			continue
 		default:
+			println(ev)
 			s.updateLastStreamedPosAndTime(ev)
 		}
 	}

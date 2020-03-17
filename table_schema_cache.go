@@ -180,7 +180,7 @@ func LoadTables(db *sql.DB, tableFilter TableFilter, columnCompressionConfig Col
 			}
 
 			tableSchemas = append(tableSchemas, &TableSchema{
-				Table:                            tableSchema,
+				Table: tableSchema,
 				CompressedColumnsForVerification: columnCompressionConfig.CompressedColumnsFor(dbname, table),
 				IgnoredColumnsForVerification:    columnIgnoreConfig.IgnoredColumnsFor(dbname, table),
 			})

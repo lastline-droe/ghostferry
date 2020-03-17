@@ -5,9 +5,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
-	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"io/ioutil"
 	"time"
+
+	sql "github.com/Shopify/ghostferry/sqlwrapper"
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/sirupsen/logrus"

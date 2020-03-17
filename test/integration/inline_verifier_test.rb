@@ -18,6 +18,31 @@ class InlineVerifierTest < GhostferryTestCase
   # General Integration Tests #
   #############################
 
+  def test_target_corruption_is_detected
+    [source_db, target_db].each do |db|
+      db.query("CREATE DATABASE IF NOT EXISTS #{DEFAULT_DB}")
+      db.query("CREATE TABLE IF NOT EXISTS #{DEFAULT_FULL_TABLE_NAME} (id bigint(20) not null auto_increment, data VARCHAR(255), data2 VARCHAR(255), primary key(id))")
+    end
+
+    source_db.prepare("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data, data2) VALUES (?, ?, ?)").execute(1, "data1", "same")
+    target_db.prepare("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data, data2) VALUES (?, ?, ?)").execute(1, "data2", "same")
+
+    ghostferry = new_ghostferry(MINIMAL_GHOSTFERRY, config: { verifier_type: "Inline", ignored_column: "data" })
+
+    corrupting_id = 1
+    ghostferry.on_status(Ghostferry::Status::ROW_COPY_COMPLETED) do
+      target_db.query("UPDATE #{DEFAULT_FULL_TABLE_NAME} SET data = 'data3' WHERE id = #{corrupting_id}")
+    end
+
+    assert_raises(GhostferryHelper::GhostferryExitFailure) do
+      ghostferry.run
+    end
+    refute_nil ghostferry.error
+
+    err_msg = ghostferry.error["ErrMessage"]
+    assert err_msg.include?("row data with paginationKey #{corrupting_id} on #{DEFAULT_FULL_TABLE_NAME} has been corrupted"), message: err_msg
+  end
+
   def test_corrupted_insert_is_detected_inline_with_batch_writer
     seed_random_data(source_db, number_of_rows: 3)
     seed_random_data(target_db, number_of_rows: 0)

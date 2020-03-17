@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	sql "github.com/Shopify/ghostferry/sqlwrapper"
 
 	"github.com/golang/snappy"
 	"github.com/sirupsen/logrus"
@@ -224,6 +225,7 @@ type InlineVerifier struct {
 
 	reverifyStore              *BinlogVerifyStore
 	verifyDuringCutoverStarted AtomicBoolean
+	cutoverCompleted           AtomicBoolean
 
 	sourceStmtCache *StmtCache
 	targetStmtCache *StmtCache
@@ -356,6 +358,8 @@ func (v *InlineVerifier) VerifyBeforeCutover() error {
 
 func (v *InlineVerifier) VerifyDuringCutover() (VerificationResult, error) {
 	v.verifyDuringCutoverStarted.Set(true)
+	defer v.cutoverCompleted.Set(true)
+
 	mismatchFound, mismatches, err := v.verifyAllEventsInStore()
 	if err != nil {
 		v.logger.WithError(err).Error("failed to VerifyDuringCutover")
@@ -553,7 +557,7 @@ func (v *InlineVerifier) compareHashesAndData(sourceHashes, targetHashes map[uin
 	return mismatchList
 }
 
-func (v *InlineVerifier) binlogEventListener(evs []DMLEvent) error {
+func (v *InlineVerifier) sourceBinlogEventListener(evs []DMLEvent) error {
 	if v.verifyDuringCutoverStarted.Get() {
 		return fmt.Errorf("cutover has started but received binlog event!")
 	}
@@ -569,7 +573,36 @@ func (v *InlineVerifier) binlogEventListener(evs []DMLEvent) error {
 
 	if v.StateTracker != nil {
 		ev := evs[len(evs)-1]
-		v.StateTracker.UpdateLastStoredBinlogPositionForInlineVerifier(ev.BinlogPosition())
+		v.StateTracker.UpdateLastStoredSourceBinlogPositionForInlineVerifier(ev.BinlogPosition())
+	}
+
+	return nil
+}
+
+// Verify that all DMLs against the target are coming from Ghostferry for the
+// duration of the move. Once cutover has completed, we no longer need to perform
+// this verification as all writes from the application are directed to the target
+func (v *InlineVerifier) targetBinlogEventListener(evs []DMLEvent) error {
+	// Cutover has completed, we do not need to verify target writes
+	if v.cutoverCompleted.Get() {
+		return nil
+	}
+
+	for _, ev := range evs {
+		annotation := ev.Annotation()
+		if annotation == "" || !strings.Contains(annotation, "Ghostferry") {
+			paginationKey, err := ev.PaginationKey()
+			if err != nil {
+				return err
+			}
+
+			return fmt.Errorf("row data with paginationKey %d on `%s`.`%s` has been corrupted", paginationKey, ev.Database(), ev.Table())
+		}
+	}
+
+	if v.StateTracker != nil {
+		ev := evs[len(evs)-1]
+		v.StateTracker.UpdateLastStoredTargetBinlogPositionForInlineVerifier(ev.BinlogPosition())
 	}
 
 	return nil

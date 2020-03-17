@@ -80,7 +80,7 @@ func (f *IntegrationFerry) Start() error {
 		return f.SendStatusAndWaitUntilContinue(StatusBeforeRowCopy, rowBatch.TableSchema().Name)
 	})
 
-	f.Ferry.BinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
+	f.Ferry.SourceBinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
 		return f.SendStatusAndWaitUntilContinue(StatusBeforeBinlogApply)
 	})
 
@@ -93,7 +93,7 @@ func (f *IntegrationFerry) Start() error {
 		return f.SendStatusAndWaitUntilContinue(StatusAfterRowCopy, rowBatch.TableSchema().Name)
 	})
 
-	f.Ferry.BinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
+	f.Ferry.SourceBinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
 		return f.SendStatusAndWaitUntilContinue(StatusAfterBinlogApply)
 	})
 

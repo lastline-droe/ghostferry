@@ -1,8 +1,9 @@
 package test
 
 import (
-	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"testing"
+
+	sql "github.com/Shopify/ghostferry/sqlwrapper"
 
 	"github.com/Shopify/ghostferry"
 	"github.com/Shopify/ghostferry/testhelpers"
@@ -59,7 +60,7 @@ func TestVerificationFailsDeletedRow(t *testing.T) {
 			NumberOfWriters:     4,
 			Tables:              []string{"gftest.table1"},
 		},
-		Ferry:                   ferry,
+		Ferry: ferry,
 		DisableChecksumVerifier: true,
 	}
 
@@ -102,7 +103,7 @@ func TestVerificationFailsUpdatedRow(t *testing.T) {
 			NumberOfWriters:     4,
 			Tables:              []string{"gftest.table1"},
 		},
-		Ferry:                   ferry,
+		Ferry: ferry,
 		DisableChecksumVerifier: true,
 	}
 
@@ -149,7 +150,7 @@ func TestIgnoresColumns(t *testing.T) {
 			NumberOfWriters:     4,
 			Tables:              []string{"gftest.table1"},
 		},
-		Ferry:                   ferry,
+		Ferry: ferry,
 		DisableChecksumVerifier: true,
 	}
 
@@ -194,7 +195,7 @@ func TestIgnoresTables(t *testing.T) {
 			NumberOfWriters:     4,
 			Tables:              []string{"gftest.table1"},
 		},
-		Ferry:                   ferry,
+		Ferry: ferry,
 		DisableChecksumVerifier: true,
 	}
 
@@ -246,7 +247,7 @@ func setupIterativeVerifierFromFerry(v *ghostferry.IterativeVerifier, f *ghostfe
 		ReadRetries: f.Config.DBReadRetries,
 	}
 
-	v.BinlogStreamer = f.BinlogStreamer
+	v.BinlogStreamer = f.SourceBinlogStreamer
 	v.SourceDB = f.SourceDB
 	v.TargetDB = f.TargetDB
 	v.Tables = f.Tables.AsSlice()

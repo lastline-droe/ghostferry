@@ -36,6 +36,7 @@ func (r RowData) GetUint64(colIdx int) (res uint64, err error) {
 }
 
 type DMLEvent interface {
+	Annotation() string
 	Database() string
 	Table() string
 	TableSchema() *TableSchema
@@ -66,6 +67,11 @@ func (e *DMLEventBase) TableSchema() *TableSchema {
 
 func (e *DMLEventBase) BinlogPosition() mysql.Position {
 	return e.pos
+}
+
+// Annotation will return any comments prefixed to the SQL string
+func (e *DMLEventBase) Annotation() string {
+	return ""
 }
 
 type BinlogInsertEvent struct {

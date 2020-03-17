@@ -2,6 +2,7 @@ package ghostferry
 
 import (
 	"fmt"
+
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 
 	"github.com/sirupsen/logrus"
