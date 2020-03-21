@@ -66,6 +66,8 @@ Features/fixes added in this fork include
   **strongly recommended** to use this feature with care and only on tables with
   few rows, as the copy process requires locking the entire table on the source
   database.
+- use `DBReadRetries` configuration setting also for retrying reading from the
+  binlog server (instead of using a hardcoded retry limit of 5).
 
 Overview of How it Works
 ------------------------
