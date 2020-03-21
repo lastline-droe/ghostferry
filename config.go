@@ -7,6 +7,7 @@ import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"io/ioutil"
+	"regexp"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -424,6 +425,23 @@ type Config struct {
 	// reconciliation process will start and Ghostferry will resume after that.
 	StateToResumeFrom *SerializableState
 
+	// If set (and no serialized state was provided), read the resume state from
+	// the target system in this database.
+	//
+	// NOTE: To avoid collision between different instances of ghostferry, the
+	// system will use the MyServerId to create unique table names within this
+	// database
+	ResumeStateFromDB string
+
+	// Enforce writing binlog writer position updates into the "resume-state
+	// DB" on every write to the DB (using a transaction). In most cases, this
+	// is not required, as double-applying data updates is safe.
+	// This is only applicable if ResumeStateFromDB is set.
+	//
+	// By default we write state only on shutdown, meaning that we may re-apply
+	// large batches of updates multiple times if we crash before serializing.
+	ForceResumeStateUpdatesToDB bool
+
 	// The verifier to use during the run. Valid choices are:
 	// ChecksumTable
 	// Iterative
@@ -503,6 +521,11 @@ func (c *Config) ValidateConfig() error {
 
 	if c.StateToResumeFrom != nil && c.StateToResumeFrom.GhostferryVersion != VersionString {
 		return fmt.Errorf("StateToResumeFrom version mismatch: resume = %s, current = %s", c.StateToResumeFrom.GhostferryVersion, VersionString)
+	}
+	if c.ResumeStateFromDB != "" {
+		if match, _ := regexp.MatchString("^[a-zA-Z0-9_-]+$", c.ResumeStateFromDB); !match {
+			return fmt.Errorf("Invalid resume-state DB: %v", c.ResumeStateFromDB)
+		}
 	}
 
 	if c.VerifierType == VerifierTypeIterative {

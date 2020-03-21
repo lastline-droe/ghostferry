@@ -36,6 +36,7 @@ module GhostferryHelper
       # This should be in sync with integrationferry.go
       READY = "READY"
       BINLOG_STREAMING_STARTED = "BINLOG_STREAMING_STARTED"
+      BINLOG_STREAMING_STOPPED = "BINLOG_STREAMING_STOPPED"
       ROW_COPY_COMPLETED = "ROW_COPY_COMPLETED"
       VERIFY_DURING_CUTOVER = "VERIFY_DURING_CUTOVER"
       VERIFIED = "VERIFIED"
@@ -233,6 +234,10 @@ module GhostferryHelper
 
         if @config[:cascading_pagination_column_config]
           environment["GHOSTFERRY_CASCADING_PAGINATION_COLUMN_CONFIG"] = @config[:cascading_pagination_column_config]
+        end
+
+        if @config[:resume_state_from_db]
+          environment["GHOSTFERRY_RESUMESTATEFROMDB"] = @config[:resume_state_from_db]
         end
 
         @logger.info("starting ghostferry test binary #{@compiled_binary_path}")

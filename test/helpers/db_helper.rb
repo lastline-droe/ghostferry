@@ -5,8 +5,12 @@ module DbHelper
   ALPHANUMERICS = ("0".."9").to_a + ("a".."z").to_a + ("A".."Z").to_a
   DB_PORTS = {source: 29291, target: 29292}
 
+  DEFAULT_SERVER_ID = 99499
+
   DEFAULT_DB = "gftest"
   DEFAULT_TABLE = "test_table_1"
+
+  DEFAULT_STATE_DB = "_ghostferry"
 
   def self.full_table_name(db, table)
     "`#{db}`.`#{table}`"
@@ -82,6 +86,7 @@ module DbHelper
   def reset_data
     @connections.each do |_, connection|
       connection.query("DROP DATABASE IF EXISTS `#{DEFAULT_DB}`")
+      connection.query("DROP DATABASE IF EXISTS `#{DEFAULT_STATE_DB}`")
     end
   end
 

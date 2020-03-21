@@ -27,6 +27,7 @@ const (
 	// Could only be sent once by the main thread
 	StatusReady                  string = "READY"
 	StatusBinlogStreamingStarted string = "BINLOG_STREAMING_STARTED"
+	StatusBinlogStreamingStopped string = "BINLOG_STREAMING_STOPPED"
 	StatusRowCopyCompleted       string = "ROW_COPY_COMPLETED"
 	StatusVerifyDuringCutover    string = "VERIFY_DURING_CUTOVER"
 	StatusVerified               string = "VERIFIED"
@@ -143,6 +144,10 @@ func (f *IntegrationFerry) Main() error {
 	// TODO: this method should return errors rather than calling
 	// the error handler to panic directly.
 	f.FlushBinlogAndStopStreaming()
+	err = f.SendStatusAndWaitUntilContinue(StatusBinlogStreamingStopped)
+	if err != nil {
+		return err
+	}
 	wg.Wait()
 
 	if f.Verifier != nil {
@@ -199,6 +204,7 @@ func NewStandardConfig() (*ghostferry.Config, error) {
 		},
 
 		DumpStateOnSignal: true,
+		MyServerId:        99499,
 	}
 
 	integrationPort := os.Getenv(portEnvName)
@@ -232,6 +238,11 @@ func NewStandardConfig() (*ghostferry.Config, error) {
 		}
 	} else if verifierType != "" {
 		config.VerifierType = verifierType
+	}
+
+	if resumeStateFromDB := os.Getenv("GHOSTFERRY_RESUMESTATEFROMDB"); resumeStateFromDB != "" {
+		config.ResumeStateFromDB = resumeStateFromDB
+		config.ForceResumeStateUpdatesToDB = true
 	}
 
 	if cascadingPaginationKeyColumnConfig := os.Getenv("GHOSTFERRY_CASCADING_PAGINATION_COLUMN_CONFIG"); cascadingPaginationKeyColumnConfig != "" {
