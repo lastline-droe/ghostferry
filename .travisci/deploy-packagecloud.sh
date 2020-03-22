@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# we do not release deb packages at this point
+exit 0
+
 set -xe
 
 gem install package_cloud
