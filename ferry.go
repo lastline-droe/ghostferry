@@ -127,6 +127,7 @@ func (f *Ferry) NewBinlogStreamer() *BinlogStreamer {
 		DBConfig:     f.Source,
 		MyServerId:   f.Config.MyServerId,
 		ErrorHandler: f.ErrorHandler,
+		ReadRetries:  f.DBReadRetries,
 		Filter:       f.CopyFilter,
 		TableSchema:  f.Tables,
 	}

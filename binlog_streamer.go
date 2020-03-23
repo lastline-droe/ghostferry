@@ -54,6 +54,7 @@ type BinlogStreamer struct {
 	DBConfig            *DatabaseConfig
 	MyServerId          uint32
 	ErrorHandler        ErrorHandler
+	ReadRetries         int
 	Filter              CopyFilter
 
 	TableSchema         TableSchemaCache
@@ -181,7 +182,7 @@ func (s *BinlogStreamer) Run() {
 		var ev *replication.BinlogEvent
 		var timedOut bool
 
-		err := WithRetries(5, 0, s.logger, "get binlog event", func() (er error) {
+		err := WithRetries(s.ReadRetries, 0, s.logger, "get binlog event", func() (er error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 			defer cancel()
 			ev, er = s.binlogStreamer.GetEvent(ctx)

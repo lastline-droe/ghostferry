@@ -59,6 +59,8 @@ Features/fixes added in this fork include
   migrating such databases and the feature must be used with great care.
   Especially the use of database- or table-rewrites may introduce invalid target
   database states that are not recoverable.
+- use `DBReadRetries` configuration setting also for retrying reading from the
+  binlog server (instead of using a hardcoded retry limit of 5).
 
 Overview of How it Works
 ------------------------
