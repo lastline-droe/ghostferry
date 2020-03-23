@@ -33,6 +33,11 @@ ticket with the details. If the issue is within the base system, open an issue
 on the original project - we constantly monitor stable changes there and
 incorporate them into this fork.
 
+Features/fixes added in this fork include
+
+- fix [data corruption for binary columns](https://github.com/Shopify/ghostferry/issues/157):
+  this fix has not made it into upstream master yet.
+
 Overview of How it Works
 ------------------------
 
