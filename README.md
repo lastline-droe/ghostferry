@@ -59,6 +59,13 @@ Features/fixes added in this fork include
   migrating such databases and the feature must be used with great care.
   Especially the use of database- or table-rewrites may introduce invalid target
   database states that are not recoverable.
+- support [copying tables without "paging" primary keys](https://github.com/Shopify/ghostferry/issues/162):
+  `Ghostferry` requires integer auto-increment primary keys for copying data.
+  An optional feature in this fork allows marking tables for "full copy",
+  allowing to copy tables that do not meet this primary key requirement. It is
+  **strongly recommended** to use this feature with care and only on tables with
+  few rows, as the copy process requires locking the entire table on the source
+  database.
 
 Overview of How it Works
 ------------------------
