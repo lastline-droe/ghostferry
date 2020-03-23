@@ -17,6 +17,22 @@ Talk to us on IRC at [irc.freenode.net #ghostferry](https://webchat.freenode.net
 - **Tutorial and General Documentations**: https://shopify.github.io/ghostferry
 - Code documentations: https://godoc.org/github.com/Shopify/ghostferry
 
+Stable Versus Experimental
+--------------------------
+
+This project is an *experimental *fork of the official
+[ghostferry project](https://github.com/Shopify/ghostferry). We add various
+features and fixes that have not (yet) made it into the upstream version.
+
+While the changes added in this fork **are considered experimental** and must
+only be used at your own risk, we use them on a daily basis and we consider
+them stable for use in practice. Still, use at your own risk and opt for the original version if their features satisfy your needs.
+
+If you discover bugs in any feature added in this fork, please open an issue
+ticket with the details. If the issue is within the base system, open an issue
+on the original project - we constantly monitor stable changes there and
+incorporate them into this fork.
+
 Overview of How it Works
 ------------------------
 
