@@ -59,8 +59,17 @@ func (this *DataIteratorTestSuite) SetupTest() {
 
 	this.receivedRows = make(map[string][]ghostferry.RowData, 0)
 
-	this.di.AddBatchListener(func(ev *ghostferry.RowBatch) error {
-		this.receivedRows[ev.TableSchema().Name] = append(this.receivedRows[ev.TableSchema().Name], ev.Values()...)
+	this.di.AddBatchListener(func(b ghostferry.RowBatch) error {
+		switch ev := b.(type) {
+		case ghostferry.InsertRowBatch:
+			if b.Size() > 0 {
+				this.receivedRows[ev.TableSchema().Name] = append(this.receivedRows[ev.TableSchema().Name], ev.Values()...)
+			}
+		}
+		// do what the batch-writer would do: mark the table as done
+		if b.IsTableComplete() {
+			this.di.StateTracker.MarkTableAsCompleted(b.TableSchema().String())
+		}
 		return nil
 	})
 }
