@@ -63,6 +63,8 @@ Features/fixes added in this fork include
   binlog server (instead of using a hardcoded retry limit of 5).
 - more robust [handling of bigint column values](https://github.com/Shopify/ghostferry/issues/165):
   this fix has not made it into upstream master yet.
+- support [writing resume/state data to file](https://github.com/Shopify/ghostferry/issues/163)
+  instead of using *stdout*.
 
 Overview of How it Works
 ------------------------
