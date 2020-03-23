@@ -50,7 +50,15 @@ Features/fixes added in this fork include
   the copy phase.  
   Note that an *incomplete* execution of `Ghostferry`  will leave the database in
   an inconsistent state until the copy is resumed and completed.
-
+- improved handling of [foreign key constraints](https://github.com/Shopify/ghostferry/issues/161):
+  support infer the table creation order automatically if the database contains
+  *foreign key constraints* and no manual order of tables is specified in the
+  configuration.  
+  Note that this merely automates part of the setup needed for supporting
+  foreign key constraints. There are still several limitations in place for
+  migrating such databases and the feature must be used with great care.
+  Especially the use of database- or table-rewrites may introduce invalid target
+  database states that are not recoverable.
 
 Overview of How it Works
 ------------------------
