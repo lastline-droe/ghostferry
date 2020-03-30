@@ -180,6 +180,11 @@ func (w *BatchWriter) handleInsertRowBatch(tx *sql.Tx, batch InsertRowBatch, db,
 	if w.StateTracker != nil {
 		// Note that the state tracker expects us the track based on the original
 		// database and table names as opposed to the target ones.
+		//
+		// NOTE: We would update the state within a transaction, but we cannot
+		// do that in case of transaction failures. Since it's safe to copy rows
+		// multiple times, it's vital that we commit the transaction before
+		// updating the state tracker
 		query, args, stateErr := w.StateTracker.GetStoreRowCopyPositionSql(batch.TableSchema().String(), endPaginationKeypos)
 		if stateErr != nil {
 			err = fmt.Errorf("during generating row-copy position for paginationKey %v -> %v: %v", startPaginationKeypos, endPaginationKeypos, stateErr)

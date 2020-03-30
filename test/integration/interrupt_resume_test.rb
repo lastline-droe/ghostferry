@@ -31,7 +31,11 @@ class InterruptResumeTest < GhostferryTestCase
     result = target_db.query("SELECT MAX(id) AS max_id FROM #{DEFAULT_FULL_TABLE_NAME}")
     last_successful_id = result.first["max_id"]
     assert last_successful_id > 0
-    assert_equal last_successful_id, dumped_state["LastSuccessfulPaginationKeys"]["#{DEFAULT_DB}.#{DEFAULT_TABLE}"]
+    # NOTE: Ideally the resume data in the target database would match the data
+    # in the resume state exactly, but there is a race condition between
+    # committing the data transaction and updating the resume data.
+    # See comments in batch_writer.go on committing the transaction for details.
+    assert_operator last_successful_id, :>=, dumped_state["LastSuccessfulPaginationKeys"]["#{DEFAULT_DB}.#{DEFAULT_TABLE}"]
   end
 
   def test_interrupt_and_resume_without_last_known_schema_cache
