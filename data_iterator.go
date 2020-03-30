@@ -99,7 +99,9 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 
 	// NOTE: We don't run full-table copies in parallel. These are meant for
 	// small-ish tables and should be kept short (due to full-table locking
-	// on the source)
+	// on the source). For the same reason, we also don't "steal" one of the
+	// limited goroutines controlled by d.Concurrency - we assume the below
+	// goroutine completes fast whereas the above one could take a long time.
 	go func() {
 		defer wg.Done()
 
