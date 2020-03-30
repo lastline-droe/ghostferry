@@ -82,7 +82,6 @@ func main() {
 	// if the state file is not provided as command-line argument, check if we
 	// are tracking state in a file according to the config. If so, and the file
 	// exists, read from there
-	runTargetInitialization := true
 	if stateFilePath == "" {
 		// unlike when provided as command-line argument, we don't require the
 		// file to exist - it simply means that we will want to serialize to
@@ -117,7 +116,6 @@ func main() {
 		}
 
 		logger.Debugf("Parsing state file %s successful", stateFilePath)
-		runTargetInitialization = false
 	}
 
 	err = config.InitializeAndValidateConfig()
@@ -142,7 +140,7 @@ func main() {
 		return
 	}
 
-	if runTargetInitialization {
+	if ferry.Ferry.StateToResumeFrom == nil {
 		logger.Debugf("Initializing target database tables")
 		err = ferry.CreateDatabasesAndTables()
 		if err != nil {

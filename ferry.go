@@ -145,8 +145,9 @@ func (f *Ferry) NewBinlogWriter() *BinlogWriter {
 		BatchSize:    f.Config.BinlogEventBatchSize,
 		WriteRetries: f.Config.DBWriteRetries,
 
-		ErrorHandler: f.ErrorHandler,
-		StateTracker: f.StateTracker,
+		ErrorHandler:                f.ErrorHandler,
+		StateTracker:                f.StateTracker,
+		ForceResumeStateUpdatesToDB: f.ForceResumeStateUpdatesToDB,
 	}
 }
 
@@ -408,10 +409,15 @@ func (f *Ferry) Initialize() (err error) {
 		f.Throttler = &PauserThrottler{}
 	}
 
-	if f.StateToResumeFrom == nil {
-		f.StateTracker = NewStateTracker(f.DataIterationConcurrency * 10)
-	} else {
+	if f.StateToResumeFrom != nil {
 		f.StateTracker = NewStateTrackerFromSerializedState(f.DataIterationConcurrency*10, f.StateToResumeFrom)
+	} else if f.ResumeStateFromDB != "" {
+		f.StateTracker, f.StateToResumeFrom, err = NewStateTrackerFromTargetDB(f)
+		if err != nil {
+			return err
+		}
+	} else {
+		f.StateTracker = NewStateTracker(f.DataIterationConcurrency * 10)
 	}
 
 	// Loads the schema of the tables that are applicable.

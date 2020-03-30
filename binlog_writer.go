@@ -16,8 +16,9 @@ type BinlogWriter struct {
 	BatchSize    int
 	WriteRetries int
 
-	ErrorHandler ErrorHandler
-	StateTracker *StateTracker
+	ErrorHandler                ErrorHandler
+	StateTracker                *StateTracker
+	ForceResumeStateUpdatesToDB bool
 
 	binlogEventBuffer chan DMLEvent
 	logger            *logrus.Entry
@@ -99,18 +100,32 @@ func (b *BinlogWriter) writeEvents(events []DMLEvent) error {
 		queryBuffer = append(queryBuffer, ";\n"...)
 	}
 
-	queryBuffer = append(queryBuffer, "COMMIT"...)
-
 	startEv := events[0]
 	endEv := events[len(events)-1]
+
+	var args []interface{}
+	if b.ForceResumeStateUpdatesToDB && b.StateTracker != nil {
+		var sql string
+		var err error
+		sql, args, err = b.StateTracker.GetStoreBinlogWriterPositionSql(endEv.BinlogPosition())
+		if err != nil {
+			return nil
+		}
+		if sql != "" {
+			queryBuffer = append(queryBuffer, sql...)
+			queryBuffer = append(queryBuffer, ";\n"...)
+		}
+	}
+
+	queryBuffer = append(queryBuffer, "COMMIT"...)
 	query := string(queryBuffer)
-	_, err := b.DB.Exec(query)
+	_, err := b.DB.Exec(query, args...)
 	if err != nil {
 		return fmt.Errorf("exec query at pos %v -> %v (%d bytes): %v", startEv.BinlogPosition(), endEv.BinlogPosition(), len(query), err)
 	}
 
 	if b.StateTracker != nil {
-		b.StateTracker.UpdateLastWrittenBinlogPosition(events[len(events)-1].BinlogPosition())
+		b.StateTracker.UpdateLastWrittenBinlogPosition(endEv.BinlogPosition())
 	}
 
 	return nil

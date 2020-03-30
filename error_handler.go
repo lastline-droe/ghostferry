@@ -51,6 +51,16 @@ func (this *PanicErrorHandler) ReportError(from string, err error) {
 		}
 	}
 
+	if this.Ferry.StateTracker != nil {
+		logger.Debug("storing state to target DB...")
+		dbErr := this.Ferry.StateTracker.SerializeToDB(this.Ferry.TargetDB)
+		if dbErr != nil {
+			logger.WithError(dbErr).Error("failed to store state to target DB...")
+		} else {
+			logger.Info("stored state to target DB")
+		}
+	}
+
 	// Invoke ErrorCallback if defined
 	if this.ErrorCallback != (HTTPCallback{}) {
 		client := &http.Client{}
