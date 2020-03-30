@@ -384,11 +384,17 @@ func (v *IterativeVerifier) iterateAllTables(mismatchedPaginationKeyFunc func(ui
 func (v *IterativeVerifier) iterateTableFingerprints(table *TableSchema, mismatchedPaginationKeyFunc func(uint64, *TableSchema) error) error {
 	// The cursor will stop iterating when it cannot find anymore rows,
 	// so it will not iterate until MaxUint64.
-	cursor := v.CursorConfig.NewCursorWithoutRowLock(table, 0, math.MaxUint64)
+	cursor := v.CursorConfig.NewPaginatedCursorWithoutRowLock(table, 0, math.MaxUint64)
 
 	// It only needs the PaginationKeys, not the entire row.
 	cursor.ColumnsToSelect = []string{fmt.Sprintf("`%s`", table.GetPaginationColumn().Name)}
-	return cursor.Each(func(batch *RowBatch) error {
+	return cursor.Each(func(rowBatch RowBatch) error {
+		var batch InsertRowBatch
+		var ok bool
+		if batch, ok = rowBatch.(InsertRowBatch); !ok {
+			return nil
+		}
+
 		metrics.Count("RowEvent", int64(batch.Size()), []MetricTag{
 			MetricTag{"table", table.Name},
 			MetricTag{"source", "iterative_verifier_before_cutover"},
@@ -552,6 +558,10 @@ func (v *IterativeVerifier) binlogEventListener(evs []DMLEvent) error {
 }
 
 func (v *IterativeVerifier) tableIsIgnored(table *TableSchema) bool {
+	if table.GetPaginationColumn() == nil {
+		return true
+	}
+
 	for _, ignored := range v.IgnoredTables {
 		if table.Name == ignored {
 			return true

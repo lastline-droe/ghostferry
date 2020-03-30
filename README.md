@@ -20,7 +20,7 @@ Talk to us on IRC at [irc.freenode.net #ghostferry](https://webchat.freenode.net
 Stable Versus Experimental
 --------------------------
 
-This project is an *experimental *fork of the official
+This project is an *experimental* fork of the official
 [ghostferry project](https://github.com/Shopify/ghostferry). We add various
 features and fixes that have not (yet) made it into the upstream version.
 
@@ -66,6 +66,13 @@ Features/fixes added in this fork include
 - support [writing resume/state data to file](https://github.com/Shopify/ghostferry/issues/163)
   instead of using *stdout*.
 - support [writing resume/state data to target database](https://github.com/Shopify/ghostferry/issues/163).
+- support [copying tables without "paging" primary keys](https://github.com/Shopify/ghostferry/issues/162):
+  `Ghostferry` requires integer auto-increment primary keys for copying data.
+  An optional feature in this fork allows marking tables for "full copy",
+  allowing to copy tables that do not meet this primary key requirement. It is
+  **strongly recommended** to use this feature with care and only on tables with
+  few rows, as the copy process requires locking the entire table on the source
+  database.
 
 Overview of How it Works
 ------------------------

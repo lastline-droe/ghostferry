@@ -120,29 +120,46 @@ func QuotedTableNameFromString(database, table string) string {
 	return fmt.Sprintf("`%s`.`%s`", database, table)
 }
 
-func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) (map[*TableSchema]uint64, []*TableSchema, error) {
-	tablesWithData := make(map[*TableSchema]uint64)
-	emptyTables := make([]*TableSchema, 0, len(tables))
+func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) (paginatedTables map[*TableSchema]uint64, unpaginatedTables []*TableSchema, err error) {
+	paginatedTables = make(map[*TableSchema]uint64)
+	unpaginatedTables = make([]*TableSchema, 0, len(tables))
 
 	for _, table := range tables {
 		logger := logger.WithField("table", table.String())
 
-		maxPaginationKey, maxPaginationKeyExists, err := maxPaginationKey(db, table)
-		if err != nil {
-			logger.WithError(err).Errorf("failed to get max primary key %s", table.GetPaginationColumn().Name)
-			return tablesWithData, emptyTables, err
+		isEmpty, dbErr := isEmptyTable(db, table)
+		if dbErr != nil {
+			err = dbErr
+			return
 		}
-
-		if !maxPaginationKeyExists {
-			emptyTables = append(emptyTables, table)
-			logger.Warn("no data in this table, skipping")
+		// NOTE: We treat empty tables just like any other non-paginated table
+		// to make sure they are marked as completed in the state-tracker (if
+		// they are not already)
+		if isEmpty || table.GetPaginationColumn() == nil {
+			logger.Debugf("tracking as unpaginated table (empty: %v)", isEmpty)
+			unpaginatedTables = append(unpaginatedTables, table)
 			continue
 		}
 
-		tablesWithData[table] = maxPaginationKey
+		maxPaginationKey, maxPaginationKeyExists, paginationErr := maxPaginationKey(db, table)
+		if paginationErr != nil {
+			logger.WithError(paginationErr).Errorf("failed to get max primary key %s", table.GetPaginationColumn().Name)
+			err = paginationErr
+			return
+		}
+
+		if !maxPaginationKeyExists {
+			// potential race in the setup
+			logger.Debugf("tracking as unpaginated table (no pagination key)")
+			unpaginatedTables = append(unpaginatedTables, table)
+			continue
+		}
+
+		logger.Debugf("tracking as paginated table with max-pagination %d", maxPaginationKey)
+		paginatedTables[table] = maxPaginationKey
 	}
 
-	return tablesWithData, emptyTables, nil
+	return
 }
 
 func LoadTables(db *sql.DB, tableFilter TableFilter, columnCompressionConfig ColumnCompressionConfig, columnIgnoreConfig ColumnIgnoreConfig, cascadingPaginationColumnConfig *CascadingPaginationColumnConfig) (TableSchemaCache, error) {
@@ -200,13 +217,18 @@ func LoadTables(db *sql.DB, tableFilter TableFilter, columnCompressionConfig Col
 			tableLog := dbLog.WithField("table", tableName)
 			tableLog.Debug("caching table schema")
 
-			paginationKeyColumn, paginationKeyIndex, err := tableSchema.paginationKeyColumn(cascadingPaginationColumnConfig)
-			if err != nil {
-				logger.WithError(err).Error("invalid table")
-				return tableSchemaCache, err
+			if cascadingPaginationColumnConfig.IsFullCopyTable(tableSchema.Schema, tableName) {
+				tableLog.Debug("table is marked for full-table copy")
+			} else {
+				tableLog.Debug("loading table schema pagination keys")
+				paginationKeyColumn, paginationKeyIndex, err := tableSchema.paginationKeyColumn(cascadingPaginationColumnConfig)
+				if err != nil {
+					tableLog.WithError(err).Error("invalid table")
+					return tableSchemaCache, err
+				}
+				tableSchema.PaginationKeyColumn = paginationKeyColumn
+				tableSchema.PaginationKeyIndex = paginationKeyIndex
 			}
-			tableSchema.PaginationKeyColumn = paginationKeyColumn
-			tableSchema.PaginationKeyIndex = paginationKeyIndex
 
 			tableSchemaCache[tableSchema.String()] = tableSchema
 		}
@@ -452,4 +474,23 @@ func maxPaginationKey(db *sql.DB, table *TableSchema) (uint64, bool, error) {
 	default:
 		return maxPaginationKey, true, nil
 	}
+}
+
+func isEmptyTable(db *sql.DB, table *TableSchema) (bool, error) {
+	query, args, err := sq.
+		Select("1").
+		From(QuotedTableName(table)).
+		Limit(1).
+		ToSql()
+
+	if err != nil {
+		return false, err
+	}
+
+	var dummy uint64
+	err = db.QueryRow(query, args...).Scan(&dummy)
+	if err == sqlorig.ErrNoRows {
+		return true, nil
+	}
+	return false, err
 }

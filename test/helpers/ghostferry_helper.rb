@@ -124,6 +124,14 @@ module GhostferryHelper
       raise "Ghostferry did not get interrupted"
     end
 
+    def run_expecting_crash(resuming_state = nil)
+      run(resuming_state)
+    rescue GhostferryExitFailure
+      return @stdout.join("\n"), @stderr.join("\n")
+    else
+      raise "Ghostferry did not crash"
+    end
+
     ######################################################
     # Methods representing the different stages of `run` #
     ######################################################

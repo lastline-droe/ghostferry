@@ -31,7 +31,12 @@ func TestSelectUpdateBinlogCopy(t *testing.T) {
 		Ferry:       testhelpers.NewTestFerry(),
 	}
 
-	testcase.Ferry.BeforeBatchCopyListener = func(batch *ghostferry.RowBatch) error {
+	testcase.Ferry.BeforeBatchCopyListener = func(rowBatch ghostferry.RowBatch) error {
+		batch, ok := rowBatch.(ghostferry.InsertRowBatch)
+		if !ok {
+			return nil
+		}
+
 		queries := make([]string, len(batch.Values()))
 		for i, row := range batch.Values() {
 			id := row[0].(int64)
@@ -148,7 +153,7 @@ func TestOnlyDeleteRowWithMaxPaginationKey(t *testing.T) {
 	testcase.Ferry.DataIterationBatchSize = 1
 
 	lastRowDeleted := false
-	testcase.Ferry.BeforeBatchCopyListener = func(batch *ghostferry.RowBatch) error {
+	testcase.Ferry.BeforeBatchCopyListener = func(batch ghostferry.RowBatch) error {
 		if lastRowDeleted {
 			return nil
 		}

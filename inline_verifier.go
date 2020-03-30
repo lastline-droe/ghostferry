@@ -244,8 +244,13 @@ func (v *InlineVerifier) Result() (VerificationResultAndStatus, error) {
 	return VerificationResultAndStatus{}, nil
 }
 
-func (v *InlineVerifier) CheckFingerprintInline(tx *sql.Tx, targetSchema, targetTable string, sourceBatch *RowBatch) ([]uint64, error) {
+func (v *InlineVerifier) CheckFingerprintInline(tx *sql.Tx, targetSchema, targetTable string, sourceBatch InsertRowBatch) ([]uint64, error) {
 	table := sourceBatch.TableSchema()
+
+	if !sourceBatch.ValuesContainPaginationKey() {
+		v.logger.Debugf("skip fingerprint check on %s.%s", table.Schema, table.Name)
+		return nil, nil
+	}
 
 	paginationKeys := make([]uint64, len(sourceBatch.Values()))
 	for i, row := range sourceBatch.Values() {

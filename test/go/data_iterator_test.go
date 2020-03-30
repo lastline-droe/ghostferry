@@ -14,10 +14,11 @@ import (
 type DataIteratorTestSuite struct {
 	*testhelpers.GhostferryUnitTestSuite
 
-	di           *ghostferry.DataIterator
-	wg           *sync.WaitGroup
-	tables       []*ghostferry.TableSchema
-	receivedRows map[string][]ghostferry.RowData
+	di                  *ghostferry.DataIterator
+	wg                  *sync.WaitGroup
+	tables              []*ghostferry.TableSchema
+	receivedRows        map[string][]ghostferry.RowData
+	receivedRowsRWMutex *sync.RWMutex
 }
 
 func (this *DataIteratorTestSuite) SetupTest() {
@@ -58,9 +59,24 @@ func (this *DataIteratorTestSuite) SetupTest() {
 	}
 
 	this.receivedRows = make(map[string][]ghostferry.RowData, 0)
+	this.receivedRowsRWMutex = &sync.RWMutex{}
 
-	this.di.AddBatchListener(func(ev *ghostferry.RowBatch) error {
-		this.receivedRows[ev.TableSchema().Name] = append(this.receivedRows[ev.TableSchema().Name], ev.Values()...)
+	this.di.AddBatchListener(func(b ghostferry.RowBatch) error {
+		switch ev := b.(type) {
+		case ghostferry.InsertRowBatch:
+			if b.Size() > 0 {
+				// it's possible that the paginated and unpaginated tables are
+				// copied in parallel. Serialize access to the map
+				this.receivedRowsRWMutex.RLock()
+				defer this.receivedRowsRWMutex.RUnlock()
+
+				this.receivedRows[ev.TableSchema().Name] = append(this.receivedRows[ev.TableSchema().Name], ev.Values()...)
+			}
+		}
+		// do what the batch-writer would do: mark the table as done
+		if b.IsTableComplete() {
+			this.di.StateTracker.MarkTableAsCompleted(b.TableSchema().String())
+		}
 		return nil
 	})
 }
