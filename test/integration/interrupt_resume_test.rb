@@ -20,7 +20,13 @@ class InterruptResumeTest < GhostferryTestCase
 
     result = target_db.query("SELECT COUNT(*) AS cnt FROM #{DEFAULT_FULL_TABLE_NAME}")
     count = result.first["cnt"]
-    assert_equal 200, count
+    # the default batch size for the data-iterator is 200 rows. We send the
+    # term signal as soon as we have copied one batch, but the processing of
+    # the signal then races with further iterations.
+    # Make sure we shut down in one of the first few iterations - on a fast
+    # system, we typically end up with 200, but we may also see one or two
+    # more copy iterations complete
+    assert_includes [200, 400, 600], count
 
     result = target_db.query("SELECT MAX(id) AS max_id FROM #{DEFAULT_FULL_TABLE_NAME}")
     last_successful_id = result.first["max_id"]
@@ -357,5 +363,58 @@ class InterruptResumeTest < GhostferryTestCase
     ghostferry.run(dumped_state)
 
     assert_test_table_is_identical
+  end
+
+  def test_interrupt_resume_state_on_db
+    state_table_prefix = "#{DEFAULT_STATE_DB}._ghostferry_#{DEFAULT_SERVER_ID}_"
+
+    ghostferry = new_ghostferry(MINIMAL_GHOSTFERRY, config: { resume_state_from_db: DEFAULT_STATE_DB })
+
+    ghostferry.on_status(Ghostferry::Status::BINLOG_STREAMING_STOPPED) do
+      ghostferry.term_and_wait_for_exit
+    end
+
+    ghostferry.run_expecting_interrupt
+
+    res = target_db.query("SELECT event_filename, event_pos, resume_filename, resume_pos FROM #{state_table_prefix}_last_binlog_writer_state")
+    assert_equal 1, res.count
+    last_binlog_state_row = nil
+    res.each do |row|
+      refute_empty row["event_filename"]
+      refute_equal row["event_pos"], 0
+      refute_empty row["resume_filename"]
+      refute_equal row["resume_pos"], 0
+      last_binlog_state_row = row
+    end
+
+    res = target_db.query("SELECT event_filename, event_pos, resume_filename, resume_pos FROM #{state_table_prefix}_last_inline_verifier_state")
+    assert_equal 1, res.count
+    res.each do |row|
+      refute_empty row["event_filename"]
+      refute_equal row["event_pos"], 0
+      refute_empty row["resume_filename"]
+      refute_equal row["resume_pos"], 0
+    end
+
+    res = target_db.query("SELECT table_name, copy_complete FROM #{state_table_prefix}_row_copy_state")
+    assert_equal 1, res.count
+    res.each do |row|
+      assert_equal "#{DEFAULT_DB}.#{DEFAULT_TABLE}", row["table_name"]
+      assert_equal 1, row["copy_complete"]
+    end
+
+    source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (data) VALUES ('value')")
+
+    ghostferry = new_ghostferry(MINIMAL_GHOSTFERRY, config: { resume_state_from_db: DEFAULT_STATE_DB })
+    ghostferry.run
+
+    assert_test_table_is_identical
+
+    res = target_db.query("SELECT event_filename, event_pos, resume_filename, resume_pos FROM #{state_table_prefix}_last_binlog_writer_state")
+    assert_equal 1, res.count
+    res.each do |row|
+      assert row['event_filename'] > last_binlog_state_row['event_filename'] || row['event_pos'] > last_binlog_state_row['event_pos']
+      assert row['resume_filename'] > last_binlog_state_row['resume_filename'] || row['resume_pos'] > last_binlog_state_row['resume_pos']
+    end
   end
 end

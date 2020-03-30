@@ -108,6 +108,10 @@ func fullTableName(schemaName, tableName string) string {
 	return fmt.Sprintf("%s.%s", schemaName, tableName)
 }
 
+func QuotedDatabaseNameFromString(database string) string {
+	return fmt.Sprintf("`%s`", database)
+}
+
 func QuotedTableName(table *TableSchema) string {
 	return QuotedTableNameFromString(table.Schema, table.Name)
 }

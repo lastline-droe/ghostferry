@@ -65,6 +65,7 @@ Features/fixes added in this fork include
   this fix has not made it into upstream master yet.
 - support [writing resume/state data to file](https://github.com/Shopify/ghostferry/issues/163)
   instead of using *stdout*.
+- support [writing resume/state data to target database](https://github.com/Shopify/ghostferry/issues/163).
 
 Overview of How it Works
 ------------------------
