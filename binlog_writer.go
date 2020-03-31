@@ -174,7 +174,7 @@ func (b *BinlogWriter) DataIteratorDoneEvent() error {
 	} else {
 		// notify the writer thread, if we're blocking schema changes
 		b.eventChannel <- eventChannelDataIterationDone
-		b.logger.Debug("data iteration completed propagated to listeners")
+		b.logger.Info("data iteration completed propagated to listeners")
 	}
 	return nil
 }
@@ -346,15 +346,14 @@ func (b *BinlogWriter) handleReplicationEvent(ev *ReplicationEvent) ([]DXLEventW
 	case *replication.QueryEvent:
 		return b.handleQueryEvent(ev, event)
 	default:
-		return nil, fmt.Errorf("unsupported replication event at pos %v: %v", ev.BinlogEvent, ev.BinlogPosition)
+		return nil, fmt.Errorf("unsupported replication event at pos %v: %T", ev.BinlogPosition, ev.BinlogEvent)
 	}
 }
 
 func (b *BinlogWriter) waitUntilCopyPhaseCompleted(table *QualifiedTableName) error {
 	if b.dataIteratorDone == 0 {
 		b.logger.Infof("blocking schema event for %s until data iteration is complete", table)
-		ev := <-b.eventChannel
-		switch ev {
+		switch ev := <-b.eventChannel {
 		case eventChannelDataIterationDone:
 			b.logger.Infof("resuming schema event for %s: data iteration complete", table)
 		case "":
@@ -438,6 +437,7 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 		queryBuffer = append(queryBuffer, ";\n"...)
 	}
 
+	startEv := events[0].ReplicationEvent
 	endEv := events[len(events)-1].ReplicationEvent
 
 	var args []interface{}
@@ -462,7 +462,7 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 
 	_, err := b.DB.Exec(query, args...)
 	if err != nil {
-		return fmt.Errorf("exec query at pos %v -> %v (%d bytes): %v", events[0].ReplicationEvent.BinlogPosition, endEv.BinlogPosition, len(query), err)
+		return fmt.Errorf("exec query at pos %v -> %v (%d bytes): %v", startEv.BinlogPosition, endEv.BinlogPosition, len(query), err)
 	}
 
 	if b.StateTracker != nil {

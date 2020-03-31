@@ -1,6 +1,8 @@
 package ghostferry
 
 import (
+	_ "github.com/pingcap/tidb/types/parser_driver" // needed for running the parser
+
 	"github.com/pingcap/parser"
 	"github.com/pingcap/parser/ast"
 	"github.com/sirupsen/logrus"

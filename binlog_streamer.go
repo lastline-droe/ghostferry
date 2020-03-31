@@ -8,7 +8,6 @@ import (
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"time"
 
-	_ "github.com/pingcap/tidb/types/parser_driver"
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/sirupsen/logrus"
