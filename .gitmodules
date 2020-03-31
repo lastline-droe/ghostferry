@@ -1,0 +1,48 @@
+[submodule "vendor/github.com/pingcap/parser"]
+	path = vendor/github.com/pingcap/parser
+	url = https://github.com/pingcap/parser.git
+[submodule "vendor/github.com/pingcap/errors"]
+	path = vendor/github.com/pingcap/errors
+	url = https://github.com/pingcap/errors.git
+[submodule "vendor/github.com/pingcap/log"]
+	path = vendor/github.com/pingcap/log
+	url = https://github.com/pingcap/log.git
+[submodule "vendor/github.com/pingcap/tidbD"]
+	path = vendor/github.com/pingcap/tidbD
+	url = https://github.com/pingcap/tidb.git
+[submodule "vendor/go.uber.org/zap"]
+	path = vendor/go.uber.org/zap
+	url = https://github.com/uber-go/zap.git
+[submodule "vendor/golang.org/x/text"]
+	path = vendor/golang.org/x/text
+	url = https://github.com/golang/text.git
+[submodule "vendor/go.uber.org/atomic"]
+	path = vendor/go.uber.org/atomic
+	url = https://github.com/uber-go/atomic.git
+[submodule "vendor/go.uber.org/multierr"]
+	path = vendor/go.uber.org/multierr
+	url = https://github.com/uber-go/multierr.git
+[submodule "vendor/gopkg.in/natefinch/lumberjack.v2"]
+	path = vendor/gopkg.in/natefinch/lumberjack.v2
+	url = https://github.com/natefinch/lumberjack.git
+[submodule "vendor/github.com/pingcap/tidb"]
+	path = vendor/github.com/pingcap/tidb
+	url = https://github.com/pingcap/tidb.git
+[submodule "vendor/github.com/cznic/mathutil"]
+	path = vendor/github.com/cznic/mathutil
+	url = https://github.com/cznic/mathutil.git
+[submodule "vendor/github.com/opentracing/opentracing-go"]
+	path = vendor/github.com/opentracing/opentracing-go
+	url = https://github.com/opentracing/opentracing-go.git
+[submodule "vendor/github.com/pingcap/tipb"]
+	path = vendor/github.com/pingcap/tipb
+	url = https://github.com/pingcap/tipb.git
+[submodule "vendor/github.com/remyoudompheng/bigfft"]
+	path = vendor/github.com/remyoudompheng/bigfft
+	url = https://github.com/remyoudompheng/bigfft.git
+[submodule "vendor/github.com/shirou/gopsutil"]
+	path = vendor/github.com/shirou/gopsutil
+	url = https://github.com/shirou/gopsutil.git
+[submodule "vendor/github.com/golang/protobuf"]
+	path = vendor/github.com/golang/protobuf
+	url = https://github.com/golang/protobuf.git

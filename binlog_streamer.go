@@ -8,6 +8,7 @@ import (
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"time"
 
+	_ "github.com/pingcap/tidb/types/parser_driver"
 	"github.com/siddontang/go-mysql/mysql"
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/sirupsen/logrus"
@@ -49,18 +50,21 @@ func (b BinlogPosition) String() string {
 	return fmt.Sprintf("Position(event %s, resume at %s)", b.EventPosition, b.ResumePosition)
 }
 
+type ReplicationEvent struct {
+	BinlogPosition BinlogPosition
+	BinlogEvent    *replication.BinlogEvent
+	EventTime      time.Time
+}
+
 type BinlogStreamer struct {
-	DB                  *sql.DB
-	DBConfig            *DatabaseConfig
-	MyServerId          uint32
-	ErrorHandler        ErrorHandler
-	ReadRetries         int
-	Filter              CopyFilter
+	DB           *sql.DB
+	DBConfig     *DatabaseConfig
+	MyServerId   uint32
+	ErrorHandler ErrorHandler
+	ReadRetries  int
 
-	TableSchema         TableSchemaCache
-
-	binlogSyncer                   *replication.BinlogSyncer
-	binlogStreamer                 *replication.BinlogStreamer
+	binlogSyncer   *replication.BinlogSyncer
+	binlogStreamer *replication.BinlogStreamer
 	// what is the last event that we ever received from the streamer
 	lastStreamedBinlogPosition     mysql.Position
 	// what is the last event that we received and from which it is possible
@@ -80,7 +84,7 @@ type BinlogStreamer struct {
 	stopRequested bool
 
 	logger         *logrus.Entry
-	eventListeners []func([]DMLEvent) error
+	eventListeners []func(*ReplicationEvent) error
 }
 
 func (s *BinlogStreamer) ensureLogger() {
@@ -204,6 +208,17 @@ func (s *BinlogStreamer) Run() {
 			continue
 		}
 
+		if IncrediblyVerboseLogging {
+			s.logger.WithFields(logrus.Fields{
+				"header": ev.Header,
+				"event":  ev.Event,
+				"raw":    ev.RawData,
+			}).Debugf("Received %T event from binlog", ev);
+			if tableMapEvent, ok := ev.Event.(*replication.TableMapEvent); ok {
+				s.logger.Debugf("Event is table-map event for table %d", tableMapEvent.TableID);
+			}
+		}
+
 		switch e := ev.Event.(type) {
 		case *replication.RotateEvent:
 			// This event is needed because we need to update the last successful
@@ -215,12 +230,11 @@ func (s *BinlogStreamer) Run() {
 				"file": s.lastStreamedBinlogPosition.Name,
 			}).Info("rotated binlog file")
 		case *replication.RowsEvent:
-			err = s.handleRowsEvent(ev)
+			err = s.emitEvent(ev)
 			if err != nil {
 				s.logger.WithError(err).Error("failed to handle rows event")
 				s.ErrorHandler.Fatal("binlog_streamer", err)
 			}
-
 			s.updateLastStreamedPosAndTime(ev)
 		case *replication.FormatDescriptionEvent:
 			// This event has a LogPos = 0, presumably because this is the first
@@ -229,10 +243,15 @@ func (s *BinlogStreamer) Run() {
 			// We don't want to save the binlog position derived from this event
 			// as it will contain the wrong thing.
 			continue
-			// case *replication.QueryEvent:
-			// This event can tell us about table structure change which means
+		case *replication.QueryEvent:
+			// This event tells us about table structure change which means
 			// the cached schemas of the tables would be invalidated.
-			// TODO: investigate using this to allow for migrations to occur.
+			err = s.emitEvent(ev)
+			if err != nil {
+				s.logger.WithError(err).Error("failed to handle query event")
+				s.ErrorHandler.Fatal("binlog_streamer", err)
+			}
+			s.updateLastStreamedPosAndTime(ev)
 		case *replication.GenericEvent:
 			// go-mysql don't parse all events and unparsed events are denoted
 			// with empty GenericEvent structs.
@@ -242,9 +261,10 @@ func (s *BinlogStreamer) Run() {
 			s.updateLastStreamedPosAndTime(ev)
 		}
 	}
+	s.logger.Info("binlog streamer stopped")
 }
 
-func (s *BinlogStreamer) AddEventListener(listener func([]DMLEvent) error) {
+func (s *BinlogStreamer) AddEventListener(listener func(*ReplicationEvent) error) {
 	s.eventListeners = append(s.eventListeners, listener)
 }
 
@@ -326,13 +346,10 @@ func (s *BinlogStreamer) getResumePositionForEvent(ev *replication.BinlogEvent) 
 	return
 }
 
-func (s *BinlogStreamer) handleRowsEvent(ev *replication.BinlogEvent) error {
-	eventTime := time.Unix(int64(ev.Header.Timestamp), 0)
-	rowsEvent := ev.Event.(*replication.RowsEvent)
-
+func (s *BinlogStreamer) emitEvent(ev *replication.BinlogEvent) error {
 	if ev.Header.LogPos == 0 {
 		// This shouldn't happen, as rows events always have a logpos.
-		s.logger.Panicf("logpos: %d %d %T", ev.Header.LogPos, ev.Header.Timestamp, ev.Event)
+		return fmt.Errorf("invalid replication event logpos: %d %d %T", ev.Header.LogPos, ev.Header.Timestamp, ev.Event)
 	}
 
 	pos := mysql.Position{
@@ -345,62 +362,27 @@ func (s *BinlogStreamer) handleRowsEvent(ev *replication.BinlogEvent) error {
 	// we may still be searching for the first event to stream to listeners, if
 	// we resumed reading upstream events from an earlier event
 	if pos.Compare(s.suppressEmitUpToBinlogPosition) <= 0 {
+		if IncrediblyVerboseLogging {
+			s.logger.Debugf("Skip emitting event at binlog position %v: waiting for event %v", pos, s.suppressEmitUpToBinlogPosition);
+		}
 		return nil
 	}
 
 	resumePosition, _ := s.getResumePositionForEvent(ev)
-	binlogPosition := BinlogPosition{
-		EventPosition:  pos,
-		ResumePosition: resumePosition,
+	event := &ReplicationEvent{
+		BinlogPosition: BinlogPosition{
+			EventPosition:  pos,
+			ResumePosition: resumePosition,
+		},
+		BinlogEvent:    ev,
+		EventTime:      time.Unix(int64(ev.Header.Timestamp), 0),
 	}
-
-	table := s.TableSchema.Get(string(rowsEvent.Table.Schema), string(rowsEvent.Table.Table))
-	if table == nil {
-		return nil
-	}
-
-	dmlEvs, err := NewBinlogDMLEvents(table, ev, binlogPosition)
-	if err != nil {
-		return err
-	}
-
-	events := make([]DMLEvent, 0)
-
-	for _, dmlEv := range dmlEvs {
-		if s.Filter != nil {
-			applicable, err := s.Filter.ApplicableEvent(dmlEv)
-			if err != nil {
-				s.logger.WithError(err).Error("failed to apply filter for event")
-				return err
-			}
-			if !applicable {
-				continue
-			}
-		}
-
-		events = append(events, dmlEv)
-		s.logger.WithFields(logrus.Fields{
-			"database": dmlEv.Database(),
-			"table":    dmlEv.Table(),
-		}).Debugf("received event %T at %v", dmlEv, eventTime)
-
-		metrics.Count("RowEvent", 1, []MetricTag{
-			MetricTag{"table", dmlEv.Table()},
-			MetricTag{"source", "binlog"},
-		}, 1.0)
-	}
-
-	if len(events) == 0 {
-		return nil
-	}
-
 	for _, listener := range s.eventListeners {
-		err := listener(events)
+		err := listener(event)
 		if err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 

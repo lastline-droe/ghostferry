@@ -248,6 +248,10 @@ module GhostferryHelper
           environment["GHOSTFERRY_RESUMESTATEFROMDB"] = @config[:resume_state_from_db]
         end
 
+        if @config[:replicate_schema_changes] == true
+          environment["GHOSTFERRY_REPLICATESCHEMACHANGES"] = "true"
+        end
+
         @logger.info("starting ghostferry test binary #{@compiled_binary_path}")
         Open3.popen3(environment, @compiled_binary_path) do |stdin, stdout, stderr, wait_thr|
           stdin.puts(resuming_state) unless resuming_state.nil?

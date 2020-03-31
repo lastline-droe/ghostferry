@@ -2,6 +2,7 @@ package test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Shopify/ghostferry"
 	"github.com/siddontang/go-mysql/replication"
@@ -60,9 +61,12 @@ func (this *DMLEventsTestSuite) TestBinlogInsertEventGeneratesInsertQuery() {
 		},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(2, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
+	this.Require().Equal(dmlEvents[1].EventTime(), now)
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -79,9 +83,11 @@ func (this *DMLEventsTestSuite) TestBinlogInsertEventWithWrongColumnsReturnsErro
 		Rows:  [][]interface{}{{1000}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 
 	_, err = dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().NotNil(err)
@@ -94,9 +100,11 @@ func (this *DMLEventsTestSuite) TestBinlogInsertEventMetadata() {
 		Rows:  [][]interface{}{{1000}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal("test_schema", dmlEvents[0].Database())
 	this.Require().Equal("test_table", dmlEvents[0].Table())
 	this.Require().Nil(dmlEvents[0].OldValues())
@@ -114,9 +122,12 @@ func (this *DMLEventsTestSuite) TestBinlogUpdateEventGeneratesUpdateQuery() {
 		},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(2, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
+	this.Require().Equal(dmlEvents[1].EventTime(), now)
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -133,9 +144,11 @@ func (this *DMLEventsTestSuite) TestBinlogUpdateEventWithWrongColumnsReturnsErro
 		Rows:  [][]interface{}{{1000}, {1000}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 
 	_, err = dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().NotNil(err)
@@ -151,9 +164,11 @@ func (this *DMLEventsTestSuite) TestBinlogUpdateEventWithNull() {
 		},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -166,9 +181,11 @@ func (this *DMLEventsTestSuite) TestBinlogUpdateEventMetadata() {
 		Rows:  [][]interface{}{{1000}, {1001}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogUpdateEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal("test_schema", dmlEvents[0].Database())
 	this.Require().Equal("test_table", dmlEvents[0].Table())
 	this.Require().Equal(ghostferry.RowData{1000}, dmlEvents[0].OldValues())
@@ -184,9 +201,12 @@ func (this *DMLEventsTestSuite) TestBinlogDeleteEventGeneratesDeleteQuery() {
 		},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(2, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
+	this.Require().Equal(dmlEvents[1].EventTime(), now)
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -205,9 +225,11 @@ func (this *DMLEventsTestSuite) TestBinlogDeleteEventWithNull() {
 		},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -220,9 +242,11 @@ func (this *DMLEventsTestSuite) TestBinlogDeleteEventWithWrongColumnsReturnsErro
 		Rows:  [][]interface{}{{1000}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 
 	_, err = dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().NotNil(err)
@@ -235,9 +259,11 @@ func (this *DMLEventsTestSuite) TestBinlogDeleteEventMetadata() {
 		Rows:  [][]interface{}{{1000}},
 	}
 
-	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	now := time.Now()
+	dmlEvents, err := ghostferry.NewBinlogDeleteEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, now)
 	this.Require().Nil(err)
 	this.Require().Equal(1, len(dmlEvents))
+	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal("test_schema", dmlEvents[0].Database())
 	this.Require().Equal("test_table", dmlEvents[0].Table())
 	this.Require().Equal(ghostferry.RowData{1000}, dmlEvents[0].OldValues())
@@ -249,7 +275,7 @@ func (this *DMLEventsTestSuite) testPaginationKey(rows [][]interface{}) uint64 {
 		Table: this.tableMapEvent,
 		Rows:  rows,
 	}
-	dmlEvents, _ := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{})
+	dmlEvents, _ := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, time.Now())
 
 	pagintionKey, err := dmlEvents[0].PaginationKey()
 	this.Require().Nil(err)

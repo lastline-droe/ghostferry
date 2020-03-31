@@ -422,6 +422,21 @@ type Config struct {
 	// Optional: defaults to false
 	AutomaticCutover bool
 
+	// This specifies if Ghostferry perform cutover at all or not
+	//
+	// Optional: defaults to false
+	DisableCutover bool
+
+	// If true, parse and propagate DB schema changes from the source
+	// to the target. This is currently in alpha and does not support
+	// all the features of ghostferry, such as
+	// - table filters (we don't know if a newly created table should
+	//   be generated), or
+	// - database/table name rewrites
+	//
+	// Optional: defaults to false
+	ReplicateSchemaChanges bool
+
 	// This specifies whether or not Ferry.Run will handle SIGINT and SIGTERM
 	// by dumping the current state to stdout and the error HTTP callback.
 	// The dumped state can be used to resume Ghostferry.
@@ -550,6 +565,16 @@ func (c *Config) ValidateConfig() error {
 	if c.ResumeStateFromDB != "" {
 		if match, _ := regexp.MatchString("^[a-zA-Z0-9_-]+$", c.ResumeStateFromDB); !match {
 			return fmt.Errorf("Invalid resume-state DB: %v", c.ResumeStateFromDB)
+		}
+	}
+
+	if c.ReplicateSchemaChanges {
+		if (len(c.TableRewrites) > 0 || len(c.DatabaseRewrites) > 0) {
+			return fmt.Errorf("Replicating schema changes with database or table rewrites is not supported")
+		}
+
+		if c.VerifierType != VerifierTypeNoVerification {
+			return fmt.Errorf("Replicating schema is incompatible with data verification")
 		}
 	}
 

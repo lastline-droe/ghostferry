@@ -1,0 +1,10 @@
+Package: ghostferry-replicatedb
+Version: {version}-1
+Section: misc
+Priority: optional
+Architecture: amd64
+Maintainer: Clemens Kolbitsch <kolbitsch@lastline.com>
+Description: Replicate MySQL data from one server to another
+  via ghostferry. NOTE: Most of the features have been
+  integrated into copydb. It's better to use copydb with a
+  specific configuration than to use this tool at this point.

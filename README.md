@@ -73,6 +73,14 @@ Features/fixes added in this fork include
   **strongly recommended** to use this feature with care and only on tables with
   few rows, as the copy process requires locking the entire table on the source
   database.
+- support [schema modifications during the cutover phase](https://fillme):
+  unlike the original version of `Ghostferry`, which ignores any DDL events (such
+  as `CREATE`/`ALTER`/`DELETE TABLE` or `TRUNCATE TABLE` statements), this fork
+  propagates such events from the source to the target database.
+  Note that there are a few restrictions with this: schema changes occurring during
+  the *copy phase* trigger the delay of binlog replication until the copy has
+  completed. Further, data integrity verification is not supported once a schema
+  is changed.
 
 Overview of How it Works
 ------------------------
