@@ -12,6 +12,7 @@ import (
 
 	"github.com/Shopify/ghostferry"
 	"github.com/Shopify/ghostferry/testhelpers"
+	"github.com/siddontang/go-mysql/replication"
 	"github.com/sirupsen/logrus"
 )
 
@@ -81,7 +82,7 @@ func (f *IntegrationFerry) Start() error {
 		return f.SendStatusAndWaitUntilContinue(StatusBeforeRowCopy, rowBatch.TableSchema().Name)
 	})
 
-	f.Ferry.BinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
+	f.Ferry.BinlogStreamer.AddEventListener(func(event *ghostferry.ReplicationEvent) error {
 		return f.SendStatusAndWaitUntilContinue(StatusBeforeBinlogApply)
 	})
 
@@ -94,8 +95,14 @@ func (f *IntegrationFerry) Start() error {
 		return f.SendStatusAndWaitUntilContinue(StatusAfterRowCopy, rowBatch.TableSchema().Name)
 	})
 
-	f.Ferry.BinlogStreamer.AddEventListener(func(events []ghostferry.DMLEvent) error {
-		return f.SendStatusAndWaitUntilContinue(StatusAfterBinlogApply)
+	f.Ferry.BinlogStreamer.AddEventListener(func(event *ghostferry.ReplicationEvent) error {
+		// the integration tests currently don't need any events other than row
+		// updates. If we stream any query events, it becomes very tricky to
+		// correctly handle events (any query would show up)
+		if _, ok := event.BinlogEvent.Event.(*replication.RowsEvent); ok {
+			return f.SendStatusAndWaitUntilContinue(StatusAfterBinlogApply)
+		}
+		return nil
 	})
 
 	return nil
@@ -248,6 +255,20 @@ func NewStandardConfig() (*ghostferry.Config, error) {
 	if cascadingPaginationKeyColumnConfig := os.Getenv("GHOSTFERRY_CASCADING_PAGINATION_COLUMN_CONFIG"); cascadingPaginationKeyColumnConfig != "" {
 		config.CascadingPaginationColumnConfig = &ghostferry.CascadingPaginationColumnConfig{}
 		err = json.Unmarshal([]byte(cascadingPaginationKeyColumnConfig), config.CascadingPaginationColumnConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if replicateSchemaChanges := os.Getenv("GHOSTFERRY_REPLICATESCHEMACHANGES"); replicateSchemaChanges != "" {
+		err = json.Unmarshal([]byte(replicateSchemaChanges), &config.ReplicateSchemaChanges)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if delayDataIterationUntilBinlogWriterShutdown := os.Getenv("GHOSTFERRY_DELAYDATAITERATIONUNTILBINLOGWRITERSHUTDOWN"); delayDataIterationUntilBinlogWriterShutdown != "" {
+		err = json.Unmarshal([]byte(delayDataIterationUntilBinlogWriterShutdown), &config.DelayDataIterationUntilBinlogWriterShutdown)
 		if err != nil {
 			return nil, err
 		}

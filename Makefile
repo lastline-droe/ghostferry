@@ -20,7 +20,7 @@ SHARE_DIR       := usr/share/ghostferry
 BIN_DIR         := usr/bin
 
 # Targets
-PROJECTS        := copydb sharding
+PROJECTS        := copydb replicatedb sharding
 PROJECT_DEBS    := $(foreach name,$(PROJECTS),$(name)-deb)
 
 # Target specific variable, set proj to have a valid value.
@@ -51,7 +51,7 @@ $(GOBIN):
 
 test:
 	@go version
-	go test ./test/go ./copydb/test ./sharding/test -p 1 -v -count 1
+	go test ./test/go ./copydb/test ./replicatedb/test ./sharding/test -p 1 -v -count 1
 	bundle install && bundle exec rake test DEBUG=1 TESTOPTS="-v"
 
 clean:

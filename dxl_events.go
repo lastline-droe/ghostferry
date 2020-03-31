@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shopspring/decimal"
 
@@ -49,21 +50,45 @@ func (r RowData) GetUint64(colIdx int) (res uint64, err error) {
 	return
 }
 
-type DMLEvent interface {
+// a DXLEvent is the base for DDL or DML
+type DXLEvent interface {
 	Database() string
 	Table() string
-	TableSchema() *TableSchema
 	AsSQLString(string, string) (string, error)
+	BinlogPosition() BinlogPosition
+	EventTime() time.Time
+	IsAutoTransaction() bool
+}
+
+type DMLEvent interface {
+	DXLEvent
+	TableSchema() *TableSchema
 	OldValues() RowData
 	NewValues() RowData
 	PaginationKey() (uint64, error)
-	BinlogPosition() BinlogPosition
 }
 
-// The base of DMLEvent to provide the necessary methods.
+// The base of DMLEvent/DDLEvent to provide the necessary methods.
+type DXLEventBase struct {
+	pos  BinlogPosition
+	time time.Time
+}
+
+func (e *DXLEventBase) BinlogPosition() BinlogPosition {
+	return e.pos
+}
+
+func (e *DXLEventBase) EventTime() time.Time {
+	return e.time
+}
+
+func (e *DXLEventBase) IsAutoTransaction() bool {
+	return false
+}
+
 type DMLEventBase struct {
 	table *TableSchema
-	pos   BinlogPosition
+	*DXLEventBase
 }
 
 func (e *DMLEventBase) Database() string {
@@ -78,22 +103,24 @@ func (e *DMLEventBase) TableSchema() *TableSchema {
 	return e.table
 }
 
-func (e *DMLEventBase) BinlogPosition() BinlogPosition {
-	return e.pos
-}
-
 type BinlogInsertEvent struct {
 	newValues RowData
 	*DMLEventBase
 }
 
-func NewBinlogInsertEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition) ([]DMLEvent, error) {
+func NewBinlogInsertEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition, time time.Time) ([]DMLEvent, error) {
 	insertEvents := make([]DMLEvent, len(rowsEvent.Rows))
 
 	for i, row := range rowsEvent.Rows {
 		insertEvents[i] = &BinlogInsertEvent{
 			newValues:    row,
-			DMLEventBase: &DMLEventBase{table: table, pos: pos},
+			DMLEventBase: &DMLEventBase{
+				table:        table,
+				DXLEventBase: &DXLEventBase{
+					pos:  pos,
+					time: time,
+				},
+			},
 		}
 	}
 
@@ -131,7 +158,7 @@ type BinlogUpdateEvent struct {
 	*DMLEventBase
 }
 
-func NewBinlogUpdateEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition) ([]DMLEvent, error) {
+func NewBinlogUpdateEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition, time time.Time) ([]DMLEvent, error) {
 	// UPDATE events have two rows in the RowsEvent. The first row is the
 	// entries of the old record (for WHERE) and the second row is the
 	// entries of the new record (for SET).
@@ -147,7 +174,13 @@ func NewBinlogUpdateEvents(table *TableSchema, rowsEvent *replication.RowsEvent,
 		updateEvents[i/2] = &BinlogUpdateEvent{
 			oldValues:    row,
 			newValues:    rowsEvent.Rows[i+1],
-			DMLEventBase: &DMLEventBase{table: table, pos: pos},
+			DMLEventBase: &DMLEventBase{
+				table:        table,
+				DXLEventBase: &DXLEventBase{
+					pos:  pos,
+					time: time,
+				},
+			},
 		}
 	}
 
@@ -191,13 +224,18 @@ func (e *BinlogDeleteEvent) NewValues() RowData {
 	return nil
 }
 
-func NewBinlogDeleteEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition) ([]DMLEvent, error) {
+func NewBinlogDeleteEvents(table *TableSchema, rowsEvent *replication.RowsEvent, pos BinlogPosition, time time.Time) ([]DMLEvent, error) {
 	deleteEvents := make([]DMLEvent, len(rowsEvent.Rows))
-
 	for i, row := range rowsEvent.Rows {
 		deleteEvents[i] = &BinlogDeleteEvent{
 			oldValues:    row,
-			DMLEventBase: &DMLEventBase{table: table, pos: pos},
+			DMLEventBase: &DMLEventBase{
+				table:        table,
+				DXLEventBase: &DXLEventBase{
+					pos:  pos,
+					time: time,
+				},
+			},
 		}
 	}
 
@@ -219,7 +257,7 @@ func (e *BinlogDeleteEvent) PaginationKey() (uint64, error) {
 	return paginationKeyFromEventData(e.table, e.oldValues)
 }
 
-func NewBinlogDMLEvents(table *TableSchema, ev *replication.BinlogEvent, pos BinlogPosition) ([]DMLEvent, error) {
+func NewBinlogDMLEvents(table *TableSchema, ev *replication.BinlogEvent, pos BinlogPosition, time time.Time) ([]DMLEvent, error) {
 	rowsEvent := ev.Event.(*replication.RowsEvent)
 
 	for _, row := range rowsEvent.Rows {
@@ -252,14 +290,80 @@ func NewBinlogDMLEvents(table *TableSchema, ev *replication.BinlogEvent, pos Bin
 
 	switch ev.Header.EventType {
 	case replication.WRITE_ROWS_EVENTv1, replication.WRITE_ROWS_EVENTv2:
-		return NewBinlogInsertEvents(table, rowsEvent, pos)
+		return NewBinlogInsertEvents(table, rowsEvent, pos, time)
 	case replication.DELETE_ROWS_EVENTv1, replication.DELETE_ROWS_EVENTv2:
-		return NewBinlogDeleteEvents(table, rowsEvent, pos)
+		return NewBinlogDeleteEvents(table, rowsEvent, pos, time)
 	case replication.UPDATE_ROWS_EVENTv1, replication.UPDATE_ROWS_EVENTv2:
-		return NewBinlogUpdateEvents(table, rowsEvent, pos)
+		return NewBinlogUpdateEvents(table, rowsEvent, pos, time)
 	default:
 		return nil, fmt.Errorf("unrecognized rows event: %s", ev.Header.EventType.String())
 	}
+}
+
+type DDLEvent interface {
+	DXLEvent
+	SqlCommand() string
+}
+
+type BinlogSchemaChangeEvent struct {
+	sqlCommand    string
+	affectedTable *QualifiedTableName
+	*DXLEventBase
+}
+
+func NewBinlogDDLEvent(command string, affectedTable *QualifiedTableName, pos BinlogPosition, time time.Time) (DDLEvent, error) {
+	event := &BinlogSchemaChangeEvent{
+		sqlCommand:    command,
+		affectedTable: affectedTable,
+		DXLEventBase:  &DXLEventBase{
+			pos:  pos,
+			time: time,
+		},
+	}
+	return event, nil
+}
+
+func (e *BinlogSchemaChangeEvent) IsAutoTransaction() bool {
+	// a schema change will always build its own transaction and commit an ongoing one!
+	return true
+}
+
+func (e *BinlogSchemaChangeEvent) Database() string {
+	return e.affectedTable.SchemaName
+}
+
+func (e *BinlogSchemaChangeEvent) Table() string {
+	return e.affectedTable.TableName
+}
+
+func (e *BinlogSchemaChangeEvent) SqlCommand() string {
+	return e.sqlCommand
+}
+
+func (e *BinlogSchemaChangeEvent) AsSQLString(schemaName, tableName string) (string, error) {
+	// We don't support altering tables schemas, dropping/adding tables, etc
+	// when remapping table names. We would have to do deeply-nested rewrites
+	// of a statement to enforce constraints
+	//
+	// The same is true for re-mapping the name of the database, because the
+	// migration command may specify the name of the target database, and our
+	// "USE <db>" (see below) becomes useless
+	if schemaName != e.affectedTable.SchemaName || tableName != e.affectedTable.TableName {
+		return "", fmt.Errorf(
+			"cannot use remapped schema/tableName %s.%s for migration of %s.%s",
+			schemaName,
+			tableName,
+			e.affectedTable.SchemaName,
+			e.affectedTable.TableName,
+		)
+	}
+
+	// In case the command changes the schema of a table without specifying the
+	// name of the DB (which is actually the most common way to write things
+	// like ALTER TABLE), we need to specify the active DB on which to apply the
+	// migration.
+	query := "USE " + QuotedDatabaseNameFromString(schemaName) + ";\n" + e.sqlCommand
+	return query, nil
 }
 
 func quotedColumnNames(table *TableSchema) []string {

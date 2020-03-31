@@ -12,6 +12,7 @@ import (
 	"time"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
 	"github.com/sirupsen/logrus"
 )
@@ -127,6 +128,7 @@ type IterativeVerifier struct {
 	IgnoredColumns      map[string]map[string]struct{}
 	DatabaseRewrites    map[string]string
 	TableRewrites       map[string]string
+	CopyFilter          CopyFilter
 	Concurrency         int
 	MaxExpectedDowntime time.Duration
 
@@ -536,22 +538,47 @@ func (v *IterativeVerifier) reverifyPaginationKeys(table *TableSchema, paginatio
 	}, mismatchedPaginationKeys, nil
 }
 
-func (v *IterativeVerifier) binlogEventListener(evs []DMLEvent) error {
+func (v *IterativeVerifier) binlogEventListener(event *ReplicationEvent) error {
 	if v.verifyDuringCutoverStarted.Get() {
 		return fmt.Errorf("cutover has started but received binlog event!")
 	}
 
-	for _, ev := range evs {
-		if v.tableIsIgnored(ev.TableSchema()) {
-			continue
+	// XXX: If we have receive a schema change event, we should postpone
+	// verification until the copy phase has completed, or the cached schema no
+	// longer applies
+	if ev, ok := event.BinlogEvent.Event.(*replication.RowsEvent); ok {
+		table := v.TableSchemaCache.Get(string(ev.Table.Schema), string(ev.Table.Table))
+		if table == nil || v.tableIsIgnored(table) || table.PaginationKeyColumn == nil {
+			if IncrediblyVerboseLogging {
+				v.logger.Debugf("Ignoring binlog event for %s.%s", ev.Table.Schema, ev.Table.Table)
+			}
+			return nil
 		}
 
-		paginationKey, err := ev.PaginationKey()
+		dmlEvs, err := NewBinlogDMLEvents(table, event.BinlogEvent, event.BinlogPosition, event.EventTime)
 		if err != nil {
 			return err
 		}
 
-		v.reverifyStore.Add(ReverifyEntry{PaginationKey: paginationKey, Table: ev.TableSchema()})
+		for _, dmlEv := range dmlEvs {
+			if v.CopyFilter != nil {
+				applicable, err := v.CopyFilter.ApplicableDMLEvent(dmlEv)
+				if err != nil {
+					v.logger.WithError(err).Error("failed to apply filter for event")
+					return err
+				}
+				if !applicable {
+					continue
+				}
+			}
+
+			paginationKey, err := dmlEv.PaginationKey()
+			if err != nil {
+				return err
+			}
+
+			v.reverifyStore.Add(ReverifyEntry{PaginationKey: paginationKey, Table: table})
+		}
 	}
 
 	return nil
