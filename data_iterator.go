@@ -72,29 +72,35 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	wg.Add(d.Concurrency + 1)
 
 	for i := 0; i < d.Concurrency; i++ {
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 
+			logger := d.logger.WithField("copy-instance", fmt.Sprintf("paginated-%d", i))
 			for {
 				table, ok := <-paginatedTablesQueue
 				if !ok {
 					break
 				}
 
+				tableLogger := logger.WithField("table", table.String())
+				tableLogger.Info("starting to process table")
+
 				err = d.processPaginatedTable(table)
 				if err != nil {
-					logger := d.logger.WithField("table", table.String())
 					switch e := err.(type) {
 					case BatchWriterVerificationFailed:
-						logger.WithField("incorrect_tables", e.table).Error(e.Error())
+						tableLogger.WithField("incorrect_tables", e.table).Error(e.Error())
 						d.ErrorHandler.Fatal("inline_verifier", err)
 					default:
-						logger.WithError(err).Error("failed to iterate table")
+						tableLogger.WithError(err).Error("failed to iterate table")
 						d.ErrorHandler.Fatal("data_iterator", err)
 					}
 				}
+				tableLogger.Info("done processing table")
 			}
-		}()
+
+			logger.Info("copier shutting down")
+		}(i)
 	}
 
 	// NOTE: We don't run full-table copies in parallel. These are meant for
@@ -105,17 +111,24 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	go func() {
 		defer wg.Done()
 
+		logger := d.logger.WithField("copy-instance", "unpaginated")
 		for {
 			table, ok := <-unpaginatedTablesQueue
 			if !ok {
 				break
 			}
 
+			tableLogger := logger.WithField("table", table.String())
+			tableLogger.Info("starting to process table")
+
 			err := d.processUnpaginatedTable(table)
 			if err != nil {
 				d.ErrorHandler.Fatal("data_iterator", err)
 			}
+			tableLogger.Info("done processing table")
 		}
+
+		logger.Info("copier shutting down")
 	}()
 
 	i := 0

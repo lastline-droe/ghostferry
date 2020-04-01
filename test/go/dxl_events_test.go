@@ -67,6 +67,8 @@ func (this *DMLEventsTestSuite) TestBinlogInsertEventGeneratesInsertQuery() {
 	this.Require().Equal(2, len(dmlEvents))
 	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal(dmlEvents[1].EventTime(), now)
+	this.Require().False(dmlEvents[0].IsAutoTransaction())
+	this.Require().False(dmlEvents[1].IsAutoTransaction())
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -128,6 +130,8 @@ func (this *DMLEventsTestSuite) TestBinlogUpdateEventGeneratesUpdateQuery() {
 	this.Require().Equal(2, len(dmlEvents))
 	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal(dmlEvents[1].EventTime(), now)
+	this.Require().False(dmlEvents[0].IsAutoTransaction())
+	this.Require().False(dmlEvents[1].IsAutoTransaction())
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -207,6 +211,8 @@ func (this *DMLEventsTestSuite) TestBinlogDeleteEventGeneratesDeleteQuery() {
 	this.Require().Equal(2, len(dmlEvents))
 	this.Require().Equal(dmlEvents[0].EventTime(), now)
 	this.Require().Equal(dmlEvents[1].EventTime(), now)
+	this.Require().False(dmlEvents[0].IsAutoTransaction())
+	this.Require().False(dmlEvents[1].IsAutoTransaction())
 
 	q1, err := dmlEvents[0].AsSQLString(this.targetTable.Schema, this.targetTable.Name)
 	this.Require().Nil(err)
@@ -330,4 +336,41 @@ func (this *DMLEventsTestSuite) TestPaginationKeyForString() {
 
 func TestDMLEventsTestSuite(t *testing.T) {
 	suite.Run(t, new(DMLEventsTestSuite))
+}
+
+type DDLEventsTestSuite struct {
+	suite.Suite
+}
+
+func (this *DDLEventsTestSuite) TestBinlogQueryGeneratesDDLEvent() {
+	now := time.Now()
+	ddlStatement := "DELETE TABLE testdb.testtable"
+	affectedTable := ghostferry.NewQualifiedTableName("testdb", "testtable")
+	ddlEvent, err := ghostferry.NewBinlogDDLEvent(ddlStatement, &affectedTable, ghostferry.BinlogPosition{}, now)
+	this.Require().Nil(err)
+	this.Require().Equal(ddlEvent.EventTime(), now)
+	this.Require().Equal(ddlEvent.Database(), "testdb")
+	this.Require().Equal(ddlEvent.Table(), "testtable")
+	this.Require().True(ddlEvent.IsAutoTransaction())
+
+	q, err := ddlEvent.AsSQLString("testdb", "testtable")
+	this.Require().Nil(err)
+	this.Require().Equal("USE `testdb`;\n" + ddlStatement, q)
+}
+
+func (this *DDLEventsTestSuite) TestBinlogQueryWithDBOrTableRenameGeneratesDDLEventError() {
+	ddlStatement := "DELETE TABLE testdb.testtable"
+	affectedTable := ghostferry.NewQualifiedTableName("testdb", "testtable")
+	ddlEvent, err := ghostferry.NewBinlogDDLEvent(ddlStatement, &affectedTable, ghostferry.BinlogPosition{}, time.Now())
+	this.Require().Nil(err)
+
+	_, err1 := ddlEvent.AsSQLString("renameddb", "testtable")
+	this.Require().Contains(err1.Error(), "cannot use remapped schema/tableName renameddb.testtable for migration of testdb.testtable")
+
+	_, err2 := ddlEvent.AsSQLString("testdb", "renamedtable")
+	this.Require().Contains(err2.Error(), "cannot use remapped schema/tableName testdb.renamedtable for migration of testdb.testtable")
+}
+
+func TestDDLEventsTestSuite(t *testing.T) {
+	suite.Run(t, new(DDLEventsTestSuite))
 }

@@ -188,6 +188,42 @@ class SchemaChangeIntegrationTests < GhostferryTestCase
     assert_equal 0, res.count
   end
 
+  def test_alter_table_during_copy_phase
+    # NOTE: Verifying that the binlog writing was delayed until copying has
+    # completed is incredibly difficult to test without being prone to races.
+    # This test simply triggers the paths involved with the delaying, but the
+    # logic for verifying that the correct path was chosen is slim.
+    [source_db, target_db].each do |db|
+      db.query("CREATE DATABASE IF NOT EXISTS #{DEFAULT_DB}")
+      db.query("CREATE TABLE IF NOT EXISTS #{DEFAULT_FULL_TABLE_NAME} (id bigint(20) not null auto_increment, data1 int(11), primary key(id))")
+    end
+
+    source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data1) VALUES (1, 2)")
+    source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data1) VALUES (3, 4)")
+
+    ghostferry = new_altering_ghostferry
+
+    first_row_copied = false
+    ghostferry.on_status(Ghostferry::Status::AFTER_ROW_COPY) do
+      if !first_row_copied
+        source_db.query("ALTER TABLE #{DEFAULT_FULL_TABLE_NAME} ADD COLUMN data2 int(11) DEFAULT 0")
+        source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data1, data2) VALUES (5, 6, 7)")
+      end
+
+      first_row_copied = true
+    end
+
+    ghostferry.run
+
+    assert row_copy_called
+
+    res = target_db.query("SHOW TABLES IN #{DEFAULT_DB}")
+    assert_equal 1, res.count
+
+    res = target_db.query("SHOW CREATE TABLE #{DEFAULT_FULL_TABLE_NAME}")
+    puts res
+  end
+
   private
 
   def new_altering_ghostferry()

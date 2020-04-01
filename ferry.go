@@ -37,7 +37,7 @@ const (
 	// useful only for debugging during development - way too verbose for debug
 	// logging in production
 	// NOTE: This may log confidential data - don't ever use for production data
-	IncrediblyVerboseLogging = false
+	IncrediblyVerboseLogging = true
 )
 
 func quoteField(field string) string {

@@ -130,7 +130,7 @@ func (b *BinlogWriter) applyBatch(batch []DXLEventWrapper) {
 
 	for _, dxlEvent := range batch {
 		if dxlEvent.PreApplyCallback != nil {
-			err := dxlEvent.PreApplyCallback(dxlEvent.DXLEvent)
+			err := dxlEvent.PreApplyCallback.Notify()
 			if err != nil {
 				b.logger.Errorf("Invoking pre-apply callback on %v failed: %s", dxlEvent, err)
 				b.ErrorHandler.Fatal("binlog_writer", err)
@@ -147,7 +147,7 @@ func (b *BinlogWriter) applyBatch(batch []DXLEventWrapper) {
 
 	for _, dxlEvent := range batch {
 		if dxlEvent.PostApplyCallback != nil {
-			err := dxlEvent.PostApplyCallback(dxlEvent.DXLEvent)
+			err := dxlEvent.PostApplyCallback.Notify()
 			if err != nil {
 				b.logger.Errorf("Invoking post-apply callback on %v failed: %s", dxlEvent, err)
 				b.ErrorHandler.Fatal("binlog_writer", err)
@@ -179,11 +179,51 @@ func (b *BinlogWriter) DataIteratorDoneEvent() error {
 	return nil
 }
 
+type DXLEventCallback interface {
+	Notify() error
+}
+
+type WaitUntilCopyPhaseCompletedCallback struct {
+	*BinlogWriter
+	WaitTriggeredBy *QualifiedTableName
+}
+
+func (c *WaitUntilCopyPhaseCompletedCallback) Notify() error {
+	return c.BinlogWriter.waitUntilCopyPhaseCompleted(c.WaitTriggeredBy)
+}
+
+type ReloadTableSchemasCallback struct {
+	*BinlogWriter
+	TableStructuresToReload []*QualifiedTableName
+}
+
+func (c *ReloadTableSchemasCallback) Notify() error {
+	for _, table := range c.TableStructuresToReload {
+		err := c.BinlogWriter.ReloadTableSchema(table)
+		if err != nil {
+			return err
+		}
+
+		// since we block the binlog writing when an alteration of
+		// schemas occurs, we can assume that all tables have been
+		// copied completely.
+		// This is particularly important if a new table is created,
+		// since we want to make sure we don't start a copy when we
+		// stop and resume the migration (via data_iterator and
+		// batch_writer)
+		err = c.BinlogWriter.MarkTableAsCopied(table)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type DXLEventWrapper struct {
 	DXLEvent
 	*ReplicationEvent
-	PreApplyCallback func(dxlEvent DXLEvent) error
-	PostApplyCallback func(dxlEvent DXLEvent) error
+	PreApplyCallback  DXLEventCallback
+	PostApplyCallback DXLEventCallback
 }
 
 func (b *BinlogWriter) handleRowsEvent(ev *ReplicationEvent, rowsEvent *replication.RowsEvent) ([]DXLEventWrapper, error) {
@@ -285,44 +325,22 @@ func (b *BinlogWriter) handleQueryEvent(ev *ReplicationEvent, queryEvent *replic
 		}).Debugf("received event %T at %v", ddlEv, ev.EventTime)
 
 		wrapper := DXLEventWrapper{
-			DXLEvent:          ddlEv,
-			ReplicationEvent:  ev,
-			PreApplyCallback:  func(dxlEvent DXLEvent) error {
-				// Before applying the change, wait for the copy to be
-				// completed, or we fail inserting data into the new schema.
-				// Same is true for table truncation, as we'd keep inserting
-				// after the truncate
-				return b.waitUntilCopyPhaseCompleted(schemaEvent.AffectedTable)
+			DXLEvent:             ddlEv,
+			ReplicationEvent:     ev,
+			// Before applying the change, wait for the copy to be completed,
+			// or we fail inserting data into the new schema. Same is true for
+			// table truncation, as we'd keep inserting after the truncate
+			PreApplyCallback: &WaitUntilCopyPhaseCompletedCallback{
+				BinlogWriter:    b,
+				WaitTriggeredBy: schemaEvent.AffectedTable,
 			},
 			// NOTE: We need to delay the extraction of the altered schema
 			// until after it has been applied. We don't know how far ahead the
 			// source (master DB) we read from might be, and the target DB has
 			// no (or an outdated) schema
-			PostApplyCallback: func(dxlEvent DXLEvent) error {
-				for _, table := range tableStructuresToReload {
-					b.logger.WithFields(logrus.Fields{
-						"database": ddlEv.Database(),
-						"table":    ddlEv.Table(),
-					}).Debugf("invalidating table schema")
-
-					err := b.reloadTableSchema(table)
-					if err != nil {
-						return err
-					}
-
-					// since we block the binlog writing when an alteration of
-					// schemas occurs, we can assume that all tables have been
-					// copied completely.
-					// This is particularly important if a new table is created,
-					// since we want to make sure we don't start a copy when we
-					// stop and resume the migration (via data_iterator and
-					// batch_writer)
-					err = b.markTableAsCopied(table)
-					if err != nil {
-						return err
-					}
-				}
-				return nil
+			PostApplyCallback: &ReloadTableSchemasCallback{
+				BinlogWriter:            b,
+				TableStructuresToReload: tableStructuresToReload,
 			},
 		}
 		events = append(events, wrapper)
@@ -353,7 +371,7 @@ func (b *BinlogWriter) handleReplicationEvent(ev *ReplicationEvent) ([]DXLEventW
 func (b *BinlogWriter) waitUntilCopyPhaseCompleted(table *QualifiedTableName) error {
 	if b.dataIteratorDone == 0 {
 		b.logger.Infof("blocking schema event for %s until data iteration is complete", table)
-		switch ev := <-b.eventChannel {
+		switch ev := <-b.eventChannel; ev {
 		case eventChannelDataIterationDone:
 			b.logger.Infof("resuming schema event for %s: data iteration complete", table)
 		case "":
@@ -367,7 +385,7 @@ func (b *BinlogWriter) waitUntilCopyPhaseCompleted(table *QualifiedTableName) er
 	return nil
 }
 
-func (b *BinlogWriter) reloadTableSchema(table *QualifiedTableName) error {
+func (b *BinlogWriter) ReloadTableSchema(table *QualifiedTableName) error {
 	b.logger.Infof("Re-loading schema of %s from target DB", table)
 	tableSchema, err := schema.NewTableFromSqlDB(b.DB.DB, table.SchemaName, table.TableName)
 	if err != nil {
@@ -387,7 +405,7 @@ func (b *BinlogWriter) reloadTableSchema(table *QualifiedTableName) error {
 	return nil
 }
 
-func (b *BinlogWriter) markTableAsCopied(table *QualifiedTableName) error {
+func (b *BinlogWriter) MarkTableAsCopied(table *QualifiedTableName) error {
 	b.logger.Infof("Notifying copy process of %s schema in target DB", table)
 	query, args, err := b.StateTracker.GetStoreRowCopyDoneSql(table.String())
 	if err != nil {
