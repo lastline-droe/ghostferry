@@ -161,8 +161,10 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	d.logger.Debug("waiting for table copy to complete")
 	wg.Wait()
 	d.logger.Debug("table copy completed, notifying listeners")
-	for _, listener := range d.doneListeners {
+	for i, listener := range d.doneListeners {
+		d.logger.Debug("notifying listener %d", i)
 		listener()
+		d.logger.Debug("notifying listener %d done", i)
 	}
 	d.logger.Debug("table copy done")
 }

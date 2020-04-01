@@ -3,7 +3,7 @@ package ghostferry
 import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
-	"sync/atomic"
+	"sync"
 
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
@@ -37,7 +37,8 @@ type BinlogWriter struct {
 	queryAnalyzer     *QueryAnalyzer
 	binlogEventBuffer chan *ReplicationEvent
 	eventChannel      chan string
-	dataIteratorDone  int32
+	dataIteratorDone  bool
+	callbackMutex     *sync.RWMutex
 	logger            *logrus.Entry
 }
 
@@ -48,6 +49,9 @@ func (b *BinlogWriter) Run() {
 	// we need a buffered channel with the number of events we may want to
 	// send. Right now, we only define one event though
 	b.eventChannel = make(chan string, 1)
+	// several callbacks can be called from different goroutines, make sure
+	// we have a central way to coordinate between them
+	b.callbackMutex = &sync.RWMutex{}
 
 	batch := make([]DXLEventWrapper, 0, b.BatchSize)
 	for {
@@ -167,12 +171,15 @@ func (b *BinlogWriter) BufferBinlogEvents(event *ReplicationEvent) error {
 }
 
 func (b *BinlogWriter) DataIteratorDoneEvent() error {
+	b.callbackMutex.Lock()
+	defer b.callbackMutex.Unlock()
 	b.logger.Info("received event: data iteration is complete")
 
-	if atomic.AddInt32(&b.dataIteratorDone, 1) > 1 {
+	if b.dataIteratorDone {
 		b.logger.Debug("data iteration completed event received before, ignored")
 	} else {
 		// notify the writer thread, if we're blocking schema changes
+		b.dataIteratorDone = true
 		b.eventChannel <- eventChannelDataIterationDone
 		b.logger.Info("data iteration completed propagated to listeners")
 	}
@@ -369,7 +376,7 @@ func (b *BinlogWriter) handleReplicationEvent(ev *ReplicationEvent) ([]DXLEventW
 }
 
 func (b *BinlogWriter) waitUntilCopyPhaseCompleted(table *QualifiedTableName) error {
-	if b.dataIteratorDone == 0 {
+	if !b.dataIteratorDone {
 		b.logger.Infof("blocking schema event for %s until data iteration is complete", table)
 		switch ev := <-b.eventChannel; ev {
 		case eventChannelDataIterationDone:

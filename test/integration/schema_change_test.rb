@@ -203,19 +203,14 @@ class SchemaChangeIntegrationTests < GhostferryTestCase
 
     ghostferry = new_altering_ghostferry
 
-    first_row_copied = false
-    ghostferry.on_status(Ghostferry::Status::AFTER_ROW_COPY) do
-      if !first_row_copied
-        source_db.query("ALTER TABLE #{DEFAULT_FULL_TABLE_NAME} ADD COLUMN data2 int(11) DEFAULT 0")
-        source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data1, data2) VALUES (5, 6, 7)")
-      end
-
-      first_row_copied = true
+    ghostferry.on_status(Ghostferry::Status::BINLOG_STREAMING_STARTED) do
+      source_db.query("ALTER TABLE #{DEFAULT_FULL_TABLE_NAME} ADD COLUMN data2 int(11) DEFAULT 0")
+      source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (id, data1, data2) VALUES (5, 6, 7)")
     end
 
     ghostferry.run
 
-    assert row_copy_called
+    assert first_row_copied
 
     res = target_db.query("SHOW TABLES IN #{DEFAULT_DB}")
     assert_equal 1, res.count
