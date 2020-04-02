@@ -55,6 +55,16 @@ type StatusDeprecated struct {
 	VerificationErr     error
 }
 
+func getPaginationColumnName(table *TableSchema) (paginationKeyName string) {
+	paginationKeyName = "not paginated"
+	paginationColumn := table.GetPaginationColumn()
+	if paginationColumn != nil {
+		paginationKeyName = paginationColumn.Name
+	}
+
+	return
+}
+
 func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	status := &StatusDeprecated{}
 
@@ -149,7 +159,7 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	for _, tableName := range completedTableNames {
 		status.TableStatuses = append(status.TableStatuses, &TableStatusDeprecated{
 			TableName:                   tableName,
-			PaginationKeyName:           f.Tables[tableName].GetPaginationColumn().Name,
+			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "complete",
 			TargetPaginationKey:         targetPaginationKeys[tableName],
 			LastSuccessfulPaginationKey: lastSuccessfulPaginationKeys[tableName],
@@ -159,7 +169,7 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	for _, tableName := range copyingTableNames {
 		status.TableStatuses = append(status.TableStatuses, &TableStatusDeprecated{
 			TableName:                   tableName,
-			PaginationKeyName:           f.Tables[tableName].GetPaginationColumn().Name,
+			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "copying",
 			TargetPaginationKey:         targetPaginationKeys[tableName],
 			LastSuccessfulPaginationKey: lastSuccessfulPaginationKeys[tableName],
@@ -169,7 +179,7 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	for _, tableName := range waitingTableNames {
 		status.TableStatuses = append(status.TableStatuses, &TableStatusDeprecated{
 			TableName:                   tableName,
-			PaginationKeyName:           f.Tables[tableName].GetPaginationColumn().Name,
+			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "waiting",
 			TargetPaginationKey:         targetPaginationKeys[tableName],
 			LastSuccessfulPaginationKey: 0,
