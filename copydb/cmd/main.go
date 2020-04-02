@@ -91,7 +91,9 @@ func main() {
 		// the filename in the config *and* specify it as command line, in which
 		// case we'll resume from the CLI argument and write to the config file,
 		// but fail if the former does not exist
-		if _, err := os.Stat(config.Config.StateFilename); !os.IsNotExist(err) {
+		if config.Config.StateFilename == "" {
+			logger.Debug("No state file specified in config")
+		} else if _, err := os.Stat(config.Config.StateFilename); !os.IsNotExist(err) {
 			stateFilePath = config.Config.StateFilename
 			logger.Infof("Reading state information from file specified in config: %s", stateFilePath)
 		} else {
