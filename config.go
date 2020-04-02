@@ -600,8 +600,8 @@ func (c *Config) ValidateConfig() error {
 			return fmt.Errorf("Replicating schema changes with database or table rewrites is not supported")
 		}
 
-		if c.VerifierType != VerifierTypeNoVerification {
-			return fmt.Errorf("Replicating schema is incompatible with data verification")
+		if c.VerifierType != "" && c.VerifierType != VerifierTypeNoVerification {
+			return fmt.Errorf("Replicating schema is incompatible with data verification (set to %s)", c.VerifierType)
 		}
 	}
 
