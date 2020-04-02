@@ -14,20 +14,53 @@ type DataIterator struct {
 	Concurrency       int
 	SelectFingerprint bool
 
-	ErrorHandler ErrorHandler
-	CursorConfig *CursorConfig
-	StateTracker *StateTracker
+	ErrorHandler         ErrorHandler
+	CursorConfig         *CursorConfig
+	StateTracker         *StateTracker
 
 	targetPaginationKeys *sync.Map
+	failOnFirstCopyError bool
 	batchListeners       []func(RowBatch) error
 	doneListeners        []func() error
 	logger               *logrus.Entry
 }
 
-func (d *DataIterator) Run(tables []*TableSchema) {
-	d.logger = logrus.WithField("tag", "data_iterator")
-	d.targetPaginationKeys = &sync.Map{}
+func NewDataIterator(f *Ferry) *DataIterator {
+	d := &DataIterator{
+		DB:                f.SourceDB,
+		Concurrency:       f.Config.DataIterationConcurrency,
+		SelectFingerprint: f.Config.VerifierType == VerifierTypeInline,
 
+		ErrorHandler: f.ErrorHandler,
+		CursorConfig: &CursorConfig{
+			DB:        f.SourceDB,
+			Throttler: f.Throttler,
+
+			BatchSize:   f.Config.DataIterationBatchSize,
+			ReadRetries: f.Config.DBReadRetries,
+		},
+		StateTracker: f.StateTracker,
+
+		failOnFirstCopyError: f.Config.FailOnFirstTableCopyError,
+	}
+	d.ensureInitialized()
+	return d
+}
+
+func (d *DataIterator) ensureInitialized() {
+	// helper in case a caller does not use NewDataIterator(), which we do in
+	// tests. So we need to use this method for methods called for public
+	// methods
+	if d.targetPaginationKeys == nil {
+		d.targetPaginationKeys = &sync.Map{}
+	}
+	if d.logger == nil {
+		d.logger = logrus.WithField("tag", "data_iterator")
+	}
+}
+
+func (d *DataIterator) Run(tables []*TableSchema) {
+	d.ensureInitialized()
 	// If a state tracker is not provided, then the caller doesn't care about
 	// tracking state. However, some methods are still useful so we initialize
 	// a minimal local instance.
@@ -66,35 +99,64 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 		}
 	}
 
+	// we allow delaying raising an error until we have at least attempted to
+	// copy every table. We may have many large tables and don't want to give
+	// up immediately. If any error arises, we log it and re-raise it once all
+	// tables have been copied or errored out.
+	// This is particularly useful if there are temporary issues with the copy,
+	// such as schemas changing on the source, but the copy races with the
+	// schema being altered on the target as well.
+	//
+	// XXX: We should detect changes in schemas of copy-in-progress tables and
+	// retry resuming the copy. For this we would simply have to re-queue a
+	// table to copy and, once it is re-read from the channel, wait until the
+	// schema has been updates. We could track a "schema version" for each
+	// table to track any incoming schema changes and wait for this version to
+	// change before re-attempting the copy. Of course there could be mulitple
+	// schema versions that we have to skip, but that should be simple to
+	// handle by trying and waiting multiple times.
+	var lastError error
+
 	paginatedTablesQueue := make(chan *TableSchema)
 	unpaginatedTablesQueue := make(chan *TableSchema)
 	wg := &sync.WaitGroup{}
 	wg.Add(d.Concurrency + 1)
 
 	for i := 0; i < d.Concurrency; i++ {
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 
+			logger := d.logger.WithField("copy-instance", fmt.Sprintf("paginated-%d", i))
 			for {
 				table, ok := <-paginatedTablesQueue
 				if !ok {
 					break
 				}
 
+				tableLogger := logger.WithField("table", table.String())
+				tableLogger.Info("starting to process table")
+
 				err = d.processPaginatedTable(table)
 				if err != nil {
-					logger := d.logger.WithField("table", table.String())
 					switch e := err.(type) {
 					case BatchWriterVerificationFailed:
-						logger.WithField("incorrect_tables", e.table).Error(e.Error())
+						tableLogger.WithField("incorrect_tables", e.table).Error(e.Error())
 						d.ErrorHandler.Fatal("inline_verifier", err)
 					default:
-						logger.WithError(err).Error("failed to iterate table")
-						d.ErrorHandler.Fatal("data_iterator", err)
+						tableLogger.WithError(err).Error("failed to iterate table")
+						if d.failOnFirstCopyError {
+							d.ErrorHandler.Fatal("data_iterator", err)
+						}
+						tableLogger.Warn("suspending error until all table copies have been attempted")
+						lastError = err
 					}
+				} else {
+					tableLogger.Info("done processing table")
 				}
 			}
-		}()
+
+			logger.Info("copier shutting down")
+		}(i)
 	}
 
 	// NOTE: We don't run full-table copies in parallel. These are meant for
@@ -105,17 +167,28 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	go func() {
 		defer wg.Done()
 
+		logger := d.logger.WithField("copy-instance", "unpaginated")
 		for {
 			table, ok := <-unpaginatedTablesQueue
 			if !ok {
 				break
 			}
 
+			tableLogger := logger.WithField("table", table.String())
+			tableLogger.Info("starting to process table")
+
 			err := d.processUnpaginatedTable(table)
-			if err != nil {
+			if err == nil {
+				tableLogger.Info("done processing table")
+			} else if d.failOnFirstCopyError {
 				d.ErrorHandler.Fatal("data_iterator", err)
+			} else {
+				tableLogger.Warn("suspending error until all table copies have been attempted")
+				lastError = err
 			}
 		}
+
+		logger.Info("copier shutting down")
 	}()
 
 	i := 0
@@ -147,6 +220,13 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 
 	d.logger.Debug("waiting for table copy to complete")
 	wg.Wait()
+
+	// if we have delayed
+	if lastError != nil {
+		d.logger.Warn("table copy has queued up errors, re-raising now that all tables have been attempted")
+		d.ErrorHandler.Fatal("data_iterator", lastError)
+	}
+
 	d.logger.Debug("table copy completed, notifying listeners")
 	for _, listener := range d.doneListeners {
 		listener()

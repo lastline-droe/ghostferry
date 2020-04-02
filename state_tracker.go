@@ -3,9 +3,9 @@ package ghostferry
 import (
 	"container/ring"
 	"fmt"
+	"math"
 	sqlorig "database/sql"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -298,7 +298,7 @@ func (s *StateTracker) SerializeToDB(db *sql.DB) error {
 
 	binlogTableName := s.getBinLogWriterStateTable()
 	s.logger.Debugf("storing state table %s: %v", binlogTableName, s.lastWrittenBinlogPosition)
-	binlogInitSql, binlogInitArgs, err := s.GetStoreBinlogWriterPositionSql(s.lastWrittenBinlogPosition)
+	binlogInitSql, binlogInitArgs, err := s.GetStoreBinlogWriterPositionSql(s.lastWrittenBinlogPosition, time.Unix(1 /* unix(0) is not a valid timestamp in MySQL */, 0))
 	if err != nil {
 		s.logger.WithField("err", err).Errorf("generating state sql for %s failed", binlogTableName)
 		return err
@@ -401,12 +401,13 @@ CREATE TABLE ` + rowCopyTableName + ` (
 CREATE TABLE ` + binlogWriterTableName + ` (
     event_filename varchar(255) CHARACTER SET ascii NOT NULL,
     event_pos int(11) UNSIGNED NOT NULL,
+    event_timestamp TIMESTAMP NOT NULL,
     resume_filename varchar(255) CHARACTER SET ascii NOT NULL,
     resume_pos int(11) UNSIGNED NOT NULL,
     write_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
-INSERT INTO ` + binlogWriterTableName + ` (event_filename, event_pos, resume_filename, resume_pos)
-    VALUES ('', 0, '', 0)
+INSERT INTO ` + binlogWriterTableName + ` (event_filename, event_pos, event_timestamp, resume_filename, resume_pos)
+    VALUES ('', 0, FROM_UNIXTIME(1), '', 0)
 `
 	s.logger.Debugf("creating state table %s on target", binlogWriterTableName)
 	_, err = db.Exec(binlogWriterCreateTable)
@@ -585,7 +586,7 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 	return state, nil
 }
 
-func (s *StateTracker) GetStoreBinlogWriterPositionSql(pos BinlogPosition) (sqlStr string, args []interface{}, err error) {
+func (s *StateTracker) GetStoreBinlogWriterPositionSql(pos BinlogPosition, lastEventTs time.Time) (sqlStr string, args []interface{}, err error) {
 	if s.stateTablesPrefix == "" {
 		return
 	}
@@ -599,7 +600,17 @@ func (s *StateTracker) GetStoreBinlogWriterPositionSql(pos BinlogPosition) (sqlS
 		return
 	}
 
-	sqlStr = fmt.Sprintf("UPDATE %s SET event_filename='%s', event_pos=%d, resume_filename='%s', resume_pos=%d", s.getBinLogWriterStateTable(), pos.EventPosition.Name, pos.EventPosition.Pos, pos.ResumePosition.Name, pos.ResumePosition.Pos)
+	sqlStr = fmt.Sprintf(`
+UPDATE %s
+SET event_filename='%s', event_pos=%d, 
+    event_timestamp=FROM_UNIXTIME(%d),
+    resume_filename='%s', resume_pos=%d
+`,
+		s.getBinLogWriterStateTable(),
+		pos.EventPosition.Name, pos.EventPosition.Pos,
+		lastEventTs.Unix(),
+		pos.ResumePosition.Name, pos.ResumePosition.Pos,
+	)
 
 	return
 }
@@ -609,16 +620,13 @@ func (s *StateTracker) GetStoreInlineVerifierPositionSql(pos BinlogPosition) (sq
 		return
 	}
 
-	// NOTE: It seems we cannot use a prepared statement here, because the
-	// binlog writer builds a transaction manually. To make sure we don't have
-	// any SQL-injection, we validate the string parameters manually and make
-	// sure to print anything else as INTs
-	if strings.Contains(pos.EventPosition.Name, "'") || strings.Contains(pos.ResumePosition.Name, "'") {
-		err = fmt.Errorf("unexpected/invalid inline verifier position name: %s", pos)
-		return
-	}
-
-	sqlStr = fmt.Sprintf("UPDATE %s SET event_filename='%s', event_pos=%d, resume_filename='%s', resume_pos=%d", s.getInlineVerifierStateTable(), pos.EventPosition.Name, pos.EventPosition.Pos, pos.ResumePosition.Name, pos.ResumePosition.Pos)
+	sqlStr, args, err = squirrel.
+		Update(s.getInlineVerifierStateTable()).
+		Set("event_filename", pos.EventPosition.Name).
+		Set("event_pos", pos.EventPosition.Pos).
+		Set("resume_filename", pos.ResumePosition.Name).
+		Set("resume_pos", pos.ResumePosition.Pos).
+		ToSql()
 
 	return
 }

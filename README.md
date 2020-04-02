@@ -73,6 +73,24 @@ Features/fixes added in this fork include
   **strongly recommended** to use this feature with care and only on tables with
   few rows, as the copy process requires locking the entire table on the source
   database.
+- support [schema modifications during the cutover phase](https://github.com/Lastline-Inc/ghostferry/issues/11):
+  unlike the original version of `Ghostferry`, which ignores any DDL events (such
+  as `CREATE`/`ALTER`/`DELETE TABLE` or `TRUNCATE TABLE` statements), this fork
+  propagates such events from the source to the target database.
+  Note that there are a few restrictions/limitations with this:
+    - schema changes occurring during the *copy phase* cannot be handled if the
+      columns of an copy-in-progress table change. There are work-arounds in
+      place to recover the copy process after a restart though (see
+      `DelayDataIterationUntilBinlogWriterShutdown` and
+      `FailOnFirstTableCopyError`).
+    - data integrity verification is not supported once a schema is changed, as
+      its current implementation assumes on generating hashes/fingerprints of
+      data/table rows. As soon as schemas are modified, it is currently not
+      possible to generate fingerprints that are consistent across different
+      schemas on source and target DB.
+    - database/table name rewrites are not supported, as we would need non-
+      trivial rewrites of schema changing statements when tables are altered,
+      renamed, created, or deleted.
 
 Overview of How it Works
 ------------------------

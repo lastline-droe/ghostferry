@@ -326,10 +326,11 @@ class InterruptResumeTest < GhostferryTestCase
     # Since we are racing between applying rows and sending the shutdown event,
     # we emit a whole bunch of them
     num_batches = 5
+    num_preload_batches = 3
     num_values_per_batch = 250
     row_id = 0
     ghostferry.on_status(Ghostferry::Status::BINLOG_STREAMING_STARTED) do
-      for _batch_id in 0..num_batches do
+      for _batch_id in 0..num_preload_batches do
         insert_sql = "INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (data) VALUES "
         for value_in_batch in 0..num_values_per_batch do
           row_id += 1
@@ -341,10 +342,20 @@ class InterruptResumeTest < GhostferryTestCase
     end
 
     ghostferry.on_status(Ghostferry::Status::AFTER_BINLOG_APPLY) do
-      # while we are emitting events in the loop above, try to inject a shutdown
-      # signal, hoping to interrupt between applying an INSERT and receiving the
-      # next table-map event
-      if row_id > 20
+      for _batch_id in num_preload_batches..num_batches do
+        insert_sql = "INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (data) VALUES "
+        for value_in_batch in 0..num_values_per_batch do
+          row_id += 1
+          insert_sql += ", " if value_in_batch > 0
+          insert_sql += "('data#{row_id}')"
+        end
+        source_db.query(insert_sql)
+      end
+
+      # while we are handling events from the loop above, try to inject a
+      # shutdown signal, hoping to interrupt between applying an INSERT
+      # and receiving the next table-map event
+      if row_id > 3
         ghostferry.term_and_wait_for_exit
       end
     end

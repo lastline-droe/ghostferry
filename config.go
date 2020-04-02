@@ -417,10 +417,52 @@ type Config struct {
 	// Optional: defaults to 4
 	DataIterationConcurrency int
 
+	// This specifies if the data-iteration/copy should be delayed until the
+	// binlog-writer shuts down. This is needed if one wishes to let replication
+	// take care of temporary issues that may be preventing the data copy.
+	//
+	// For instance, if the source DB has schema changes that are not yet
+	// applied on the target DB, copy will fail. Setting this to true allows
+	// giving the binlog-writer time to catch up to then resume the copy at a
+	// later time.
+	//
+	// This is only meaningful if we can expect an external trigger for shutting
+	// down ghostferry at some point, as an automatic cutover will only happen
+	// once the data copy is done (which would never happen if the binlog
+	// writing is not interrupted).
+	//
+	// Optional: defaults to false
+	DelayDataIterationUntilBinlogWriterShutdown bool
+
+	// This specifies if the data-iteration should temporarily delay failing on
+	// copy errors until all tables have at least been attempted to be copied.
+	// Errors are still raised, we simply give the copy the opportunity to copy
+	// all tables. Since the order of copy of tables is non-deterministic, this
+	// simply ensures tables copied without errors are treated as if they were
+	// copied first.
+	//
+	// Optional: defaults to false
+	FailOnFirstTableCopyError bool
+
 	// This specifies if Ghostferry will pause before cutover or not.
 	//
 	// Optional: defaults to false
 	AutomaticCutover bool
+
+	// This specifies if Ghostferry perform cutover at all or not
+	//
+	// Optional: defaults to false
+	DisableCutover bool
+
+	// If true, parse and propagate DB schema changes from the source
+	// to the target. This is currently in alpha and does not support
+	// all the features of ghostferry, such as
+	// - table filters (we don't know if a newly created table should
+	//   be generated), or
+	// - database/table name rewrites
+	//
+	// Optional: defaults to false
+	ReplicateSchemaChanges bool
 
 	// This specifies whether or not Ferry.Run will handle SIGINT and SIGTERM
 	// by dumping the current state to stdout and the error HTTP callback.
@@ -550,6 +592,16 @@ func (c *Config) ValidateConfig() error {
 	if c.ResumeStateFromDB != "" {
 		if match, _ := regexp.MatchString("^[a-zA-Z0-9_-]+$", c.ResumeStateFromDB); !match {
 			return fmt.Errorf("Invalid resume-state DB: %v", c.ResumeStateFromDB)
+		}
+	}
+
+	if c.ReplicateSchemaChanges {
+		if (len(c.TableRewrites) > 0 || len(c.DatabaseRewrites) > 0) {
+			return fmt.Errorf("Replicating schema changes with database or table rewrites is not supported")
+		}
+
+		if c.VerifierType != VerifierTypeNoVerification {
+			return fmt.Errorf("Replicating schema is incompatible with data verification")
 		}
 	}
 

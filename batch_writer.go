@@ -216,6 +216,9 @@ func (w *BatchWriter) queueStatement(tx *sql.Tx, query string, args []interface{
 		return
 	}
 
+	if IncrediblyVerboseLogging {
+		w.logger.Debugf("Applying copy statements: %s (%v)", query, args)
+	}
 	_, err = tx.Stmt(stmt).Exec(args...)
 	if err != nil {
 		err = fmt.Errorf("during copy statement: %v", err)

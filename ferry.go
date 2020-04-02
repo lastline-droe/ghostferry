@@ -33,6 +33,11 @@ const (
 	StateVerifyBeforeCutover = "verify-before-cutover"
 	StateCutover             = "cutover"
 	StateDone                = "done"
+
+	// useful only for debugging during development - way too verbose for debug
+	// logging in production
+	// NOTE: This may log confidential data - don't ever use for production data
+	IncrediblyVerboseLogging = false
 )
 
 func quoteField(field string) string {
@@ -65,6 +70,10 @@ type Ferry struct {
 	ErrorHandler                       ErrorHandler
 	Throttler                          Throttler
 	WaitUntilReplicaIsCaughtUpToMaster *WaitUntilReplicaIsCaughtUpToMaster
+	// For migrating data, it is crucial that we're either reading from a master or from a slave
+	// that is up-to-date with its master. If we are just continuously repliating/streaming data,
+	// it's OK to work on an outdated upstream
+	AllowReplicationFromReplia         bool
 
 	// This can be specified by the caller. If specified, do not specify
 	// VerifierType in Config (or as an empty string) or an error will be
@@ -90,22 +99,7 @@ type Ferry struct {
 func (f *Ferry) NewDataIterator() *DataIterator {
 	f.ensureInitialized()
 
-	dataIterator := &DataIterator{
-		DB:                f.SourceDB,
-		Concurrency:       f.Config.DataIterationConcurrency,
-		SelectFingerprint: f.Config.VerifierType == VerifierTypeInline,
-
-		ErrorHandler: f.ErrorHandler,
-		CursorConfig: &CursorConfig{
-			DB:        f.SourceDB,
-			Throttler: f.Throttler,
-
-			BatchSize:   f.Config.DataIterationBatchSize,
-			ReadRetries: f.Config.DBReadRetries,
-		},
-		StateTracker: f.StateTracker,
-	}
-
+	dataIterator := NewDataIterator(f)
 	if f.CopyFilter != nil {
 		dataIterator.CursorConfig.BuildSelect = f.CopyFilter.BuildSelect
 	}
@@ -128,8 +122,6 @@ func (f *Ferry) NewBinlogStreamer() *BinlogStreamer {
 		MyServerId:   f.Config.MyServerId,
 		ErrorHandler: f.ErrorHandler,
 		ReadRetries:  f.DBReadRetries,
-		Filter:       f.CopyFilter,
-		TableSchema:  f.Tables,
 	}
 }
 
@@ -142,12 +134,17 @@ func (f *Ferry) NewBinlogWriter() *BinlogWriter {
 		TableRewrites:    f.Config.TableRewrites,
 		Throttler:        f.Throttler,
 
-		BatchSize:    f.Config.BinlogEventBatchSize,
-		WriteRetries: f.Config.DBWriteRetries,
+		BatchSize:          f.Config.BinlogEventBatchSize,
+		WriteRetries:       f.Config.DBWriteRetries,
+		ApplySchemaChanges: f.Config.ReplicateSchemaChanges,
 
 		ErrorHandler:                f.ErrorHandler,
 		StateTracker:                f.StateTracker,
 		ForceResumeStateUpdatesToDB: f.ForceResumeStateUpdatesToDB,
+
+		CopyFilter:  f.CopyFilter,
+		TableFilter: f.TableFilter,
+		TableSchema: f.Tables,
 	}
 }
 
@@ -208,6 +205,7 @@ func (f *Ferry) NewInlineVerifier() *InlineVerifier {
 		DatabaseRewrites:           f.Config.DatabaseRewrites,
 		TableRewrites:              f.Config.TableRewrites,
 		TableSchemaCache:           f.Tables,
+		CopyFilter:                 f.CopyFilter,
 		BatchSize:                  f.Config.BinlogEventBatchSize,
 		VerifyBinlogEventsInterval: f.Config.InlineVerifierConfig.verifyBinlogEventsInterval,
 		MaxExpectedDowntime:        f.Config.InlineVerifierConfig.maxExpectedDowntime,
@@ -276,6 +274,7 @@ func (f *Ferry) NewIterativeVerifier() (*IterativeVerifier, error) {
 		IgnoredColumns:      ignoredColumns,
 		DatabaseRewrites:    f.Config.DatabaseRewrites,
 		TableRewrites:       f.Config.TableRewrites,
+		CopyFilter:          f.CopyFilter,
 		Concurrency:         config.Concurrency,
 		MaxExpectedDowntime: maxExpectedDowntime,
 	}
@@ -381,7 +380,7 @@ func (f *Ferry) Initialize() (err error) {
 			f.logger.WithError(err).Error("source master is a read replica")
 			return err
 		}
-	} else {
+	} else if !f.AllowReplicationFromReplia {
 		isReplica, err := CheckDbIsAReplica(f.SourceDB)
 		if err != nil {
 			f.logger.WithError(err).Error("cannot check if source is a replica")
@@ -613,6 +612,12 @@ func (f *Ferry) Run() {
 
 	go func() {
 		defer dataIteratorWg.Done()
+
+		if f.Config.DelayDataIterationUntilBinlogWriterShutdown {
+			f.logger.Info("Delaying data copy until binlog writer shuts down")
+			binlogWg.Wait()
+			f.logger.Info("Binlog writer has shut down, resuming data copy")
+		}
 		f.DataIterator.Run(f.Tables.AsSlice())
 	}()
 
@@ -636,13 +641,15 @@ func (f *Ferry) Run() {
 		})
 	}
 
-	f.logger.Info("data copy is complete, waiting for cutover")
-	f.OverallState = StateWaitingForCutover
-	f.waitUntilAutomaticCutoverIsTrue()
+	if !f.DisableCutover {
+		f.logger.Info("data copy is complete, waiting for cutover")
+		f.OverallState = StateWaitingForCutover
+		f.waitUntilAutomaticCutoverIsTrue()
 
-	f.logger.Info("entering cutover phase, notifying caller that row copy is complete")
-	f.OverallState = StateCutover
-	f.notifyRowCopyComplete()
+		f.logger.Info("entering cutover phase, notifying caller that row copy is complete")
+		f.OverallState = StateCutover
+		f.notifyRowCopyComplete()
+	}
 
 	// Cutover is a cooperative activity between the Ghostferry library and
 	// applications built on Ghostferry:

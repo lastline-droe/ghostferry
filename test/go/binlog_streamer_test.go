@@ -36,7 +36,7 @@ func (this *BinlogStreamerTestSuite) SetupTest() {
 	}
 
 	testhelpers.SeedInitialData(this.sourceDb, "gftest", "test_table_1", 0)
-	tableSchemaCache, err := ghostferry.LoadTables(
+	_, err = ghostferry.LoadTables(
 		this.sourceDb,
 		&testhelpers.TestTableFilter{
 			DbsFunc:    testhelpers.DbApplicabilityFilter([]string{testhelpers.TestSchemaName}),
@@ -54,8 +54,6 @@ func (this *BinlogStreamerTestSuite) SetupTest() {
 		MyServerId:   testFerry.Config.MyServerId,
 		ErrorHandler: testFerry.ErrorHandler,
 		ReadRetries:  testFerry.DBReadRetries,
-		Filter:       testFerry.CopyFilter,
-		TableSchema:  tableSchemaCache,
 	}
 }
 
@@ -94,11 +92,10 @@ func (this *BinlogStreamerTestSuite) TestBinlogStreamerSetsBinlogPositionOnDMLEv
 
 	eventAsserted := false
 
-	this.binlogStreamer.AddEventListener(func(evs []ghostferry.DMLEvent) error {
+	this.binlogStreamer.AddEventListener(func(event *ghostferry.ReplicationEvent) error {
 		eventAsserted = true
-		this.Require().Equal(1, len(evs))
-		this.Require().True(strings.HasPrefix(evs[0].BinlogPosition().EventPosition.Name, "mysql-bin."))
-		this.Require().True(evs[0].BinlogPosition().EventPosition.Pos > 0)
+		this.Require().True(strings.HasPrefix(event.BinlogPosition.EventPosition.Name, "mysql-bin."))
+		this.Require().True(event.BinlogPosition.EventPosition.Pos > 0)
 		this.binlogStreamer.FlushAndStop()
 		return nil
 	})

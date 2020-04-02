@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang/snappy"
+	"github.com/siddontang/go-mysql/replication"
 	"github.com/sirupsen/logrus"
 )
 
@@ -214,6 +215,7 @@ type InlineVerifier struct {
 	TargetDB                   *sql.DB
 	DatabaseRewrites           map[string]string
 	TableRewrites              map[string]string
+	CopyFilter                 CopyFilter
 	TableSchemaCache           TableSchemaCache
 	BatchSize                  int
 	VerifyBinlogEventsInterval time.Duration
@@ -311,7 +313,10 @@ func (v *InlineVerifier) PeriodicallyVerifyBinlogEvents(ctx context.Context) {
 				v.ErrorHandler.Fatal("inline_verifier", err)
 			}
 
-			v.readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches)
+			err = v.readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches)
+			if err != nil {
+				v.ErrorHandler.Fatal("inline_verifier", err)
+			}
 
 			v.logger.WithFields(logrus.Fields{
 				"remainingRowCount": v.reverifyStore.currentRowCount,
@@ -337,7 +342,11 @@ func (v *InlineVerifier) VerifyBeforeCutover() error {
 			return err
 		}
 
-		v.readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches)
+		err = v.readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches)
+		if err != nil {
+			return err
+		}
+
 		after := v.reverifyStore.currentRowCount
 		timeToVerify = time.Now().Sub(start)
 
@@ -558,37 +567,69 @@ func (v *InlineVerifier) compareHashesAndData(sourceHashes, targetHashes map[uin
 	return mismatchList
 }
 
-func (v *InlineVerifier) binlogEventListener(evs []DMLEvent) error {
+func (v *InlineVerifier) binlogEventListener(event *ReplicationEvent) error {
 	if v.verifyDuringCutoverStarted.Get() {
 		return fmt.Errorf("cutover has started but received binlog event!")
 	}
 
-	for _, ev := range evs {
-		paginationKey, err := ev.PaginationKey()
+	// XXX: If we have receive a schema change event, we should postpone
+	// verification until the copy phase has completed, or the cached schema no
+	// longer applies
+	if ev, ok := event.BinlogEvent.Event.(*replication.RowsEvent); ok {
+		table := v.TableSchemaCache.Get(string(ev.Table.Schema), string(ev.Table.Table))
+		if table == nil || table.PaginationKeyColumn == nil {
+			if IncrediblyVerboseLogging {
+				v.logger.Debugf("Ignoring binlog event for %s.%s", ev.Table.Schema, ev.Table.Table)
+			}
+			return nil
+		}
+
+		dmlEvs, err := NewBinlogDMLEvents(table, event.BinlogEvent, event.BinlogPosition, event.EventTime)
 		if err != nil {
 			return err
 		}
 
-		v.reverifyStore.Add(ev.TableSchema(), paginationKey)
-	}
+		for _, dmlEv := range dmlEvs {
+			if v.CopyFilter != nil {
+				applicable, err := v.CopyFilter.ApplicableDMLEvent(dmlEv)
+				if err != nil {
+					v.logger.WithError(err).Error("failed to apply filter for event")
+					return err
+				}
+				if !applicable {
+					continue
+				}
+			}
 
-	if v.StateTracker != nil {
-		ev := evs[len(evs)-1]
-		v.StateTracker.UpdateLastStoredBinlogPositionForInlineVerifier(ev.BinlogPosition())
+			paginationKey, err := dmlEv.PaginationKey()
+			if err != nil {
+				return err
+			}
+
+			v.reverifyStore.Add(table, paginationKey)
+		}
+
+		if v.StateTracker != nil {
+			v.StateTracker.UpdateLastStoredBinlogPositionForInlineVerifier(event.BinlogPosition)
+		}
 	}
 
 	return nil
 }
 
-func (v *InlineVerifier) readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches map[string]map[string][]uint64) {
+func (v *InlineVerifier) readdMismatchedPaginationKeysToBeVerifiedAgain(mismatches map[string]map[string][]uint64) error {
 	for schemaName, _ := range mismatches {
 		for tableName, paginationKeys := range mismatches[schemaName] {
 			table := v.TableSchemaCache.Get(schemaName, tableName)
+			if table == nil {
+				return fmt.Errorf("programming error? %s.%s is not found in TableSchemaCache but is being reverified", schemaName, tableName)
+			}
 			for _, paginationKey := range paginationKeys {
 				v.reverifyStore.Add(table, paginationKey)
 			}
 		}
 	}
+	return nil
 }
 
 // Returns mismatches in the form of db -> table -> paginationKeys
