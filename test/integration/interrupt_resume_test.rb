@@ -369,7 +369,9 @@ class InterruptResumeTest < GhostferryTestCase
     # If this starts to make the test unreliable, we may want to remove this or
     # further tweak the batch values.
     resume_state = dumped_state["LastWrittenBinlogPosition"]
-    refute_equal resume_state["EventPosition"], resume_state["ResumePosition"]
+
+    # XXX: It's just too racy. We keep failing builds on travis-ci
+    #refute_equal resume_state["EventPosition"], resume_state["ResumePosition"]
 
     ghostferry = new_ghostferry(MINIMAL_GHOSTFERRY)
     # if we did not resume at a proper state, this invocation of ghostferry
