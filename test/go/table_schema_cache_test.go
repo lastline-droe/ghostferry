@@ -450,6 +450,56 @@ func (this *TableSchemaCacheTestSuite) TestGetTableCreationOrderWithForeignKeyCo
 	this.Require().True(table2Index < table3Index)
 }
 
+func (this *TableSchemaCacheTestSuite) TestGetTableCreationOrderWithSelfReferencingForeignKeyConstraint() {
+	_, err := this.Ferry.SourceDB.Exec(fmt.Sprintf("CREATE TABLE `%s`.`table1` (`id` BIGINT, PRIMARY KEY (`id`))", testhelpers.TestSchemaName))
+	this.Require().Nil(err)
+	_, err = this.Ferry.SourceDB.Exec(fmt.Sprintf("CREATE TABLE `%s`.`table2` (`id1` BIGINT, `id2` BIGINT, PRIMARY KEY (`id1`), KEY `test_key` (`id2`), CONSTRAINT `test_fkc1` FOREIGN KEY (`id2`) REFERENCES `table2` (`id1`), CONSTRAINT `test_fkc2` FOREIGN KEY (`id2`) REFERENCES `table1` (`id`))", testhelpers.TestSchemaName))
+	this.Require().Nil(err)
+
+	tables, err := ghostferry.LoadTables(this.Ferry.SourceDB, this.Ferry.TableFilter, nil, nil, nil)
+	this.Require().Nil(err)
+
+	creationOrder, err := tables.GetTableCreationOrder(this.Ferry.SourceDB)
+	this.Require().Nil(err)
+
+	// 3 tests from the base test setup plus 2 added above
+	this.Require().Equal(len(creationOrder), 5)
+	this.Require().ElementsMatch(creationOrder, tables.AllTableNames())
+
+	// verify the order: all we care for is that table1 is created before
+	// table2, which is created before table3
+	table1Index := -1
+	table2Index := -1
+	for i, tableName := range creationOrder {
+		if strings.HasSuffix(tableName, ".table1") {
+			table1Index = i
+		} else if strings.HasSuffix(tableName, ".table2") {
+			table2Index = i
+		}
+	}
+	this.Require().NotEqual(table1Index, -1)
+	this.Require().NotEqual(table2Index, -1)
+	this.Require().True(table1Index < table2Index)
+}
+
+func (this *TableSchemaCacheTestSuite) TestGetTableCreationOrderWithSelfReferencingForeignKeyConstraintAndNormalForeignKey() {
+	_, err := this.Ferry.SourceDB.Exec(fmt.Sprintf("CREATE TABLE `%s`.`table` (`id1` BIGINT, `id2` BIGINT, PRIMARY KEY (`id1`), KEY `test_key` (`id2`), CONSTRAINT `test_fkc` FOREIGN KEY (`id2`) REFERENCES `table` (`id1`))", testhelpers.TestSchemaName))
+	this.Require().Nil(err)
+
+	tables, err := ghostferry.LoadTables(this.Ferry.SourceDB, this.Ferry.TableFilter, nil, nil, nil)
+	this.Require().Nil(err)
+
+	creationOrder, err := tables.GetTableCreationOrder(this.Ferry.SourceDB)
+	this.Require().Nil(err)
+
+	// 3 tests from the base test setup plus 1 added above
+	//
+	// NOTE: We don't need to test much here, just that we don't fail finding
+	// an acceptable ordering despite the self-referencing table
+	this.Require().Equal(len(creationOrder), 4)
+	this.Require().ElementsMatch(creationOrder, tables.AllTableNames())
+}
+
 func TestTableSchemaCache(t *testing.T) {
 	testhelpers.SetupTest()
 	suite.Run(t, &TableSchemaCacheTestSuite{GhostferryUnitTestSuite: &testhelpers.GhostferryUnitTestSuite{}})
