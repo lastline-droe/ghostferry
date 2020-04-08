@@ -354,7 +354,8 @@ func (c TableSchemaCache) GetTableCreationOrder(db *sql.DB) (prioritzedTableName
 		t := strings.Split(tableName, ".")
 		table := NewQualifiedTableName(t[0], t[1])
 
-		referencedTables, dbErr := GetForeignKeyTablesOfTable(db, table)
+		// ignore self-references, as they are not really foreign keys
+		referencedTables, dbErr := GetForeignKeyTablesOfTable(db, table, false)
 		if dbErr != nil {
 			logger.WithField("table", table).Error("cannot analyze database table foreign keys")
 			err = dbErr
@@ -394,7 +395,11 @@ func (c TableSchemaCache) GetTableCreationOrder(db *sql.DB) (prioritzedTableName
 		}
 
 		if !createdTable {
-			err = fmt.Errorf("failed creating tables: all %d remaining tables have foreign references", len(tableReferences))
+			tableNames := make([]QualifiedTableName, 0, len(tableReferences))
+			for tableName := range tableReferences {
+				tableNames = append(tableNames, tableName)
+			}
+			err = fmt.Errorf("failed creating tables: all %d remaining tables have foreign references: %v", len(tableReferences), tableNames)
 			return
 		}
 	}

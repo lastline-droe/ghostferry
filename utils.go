@@ -256,17 +256,22 @@ func (n QualifiedTableName) String() string {
 // define a simple set of table names
 type TableForeignKeys map[QualifiedTableName]bool
 
-func GetForeignKeyTablesOfTable(db *sql.DB, table QualifiedTableName) (TableForeignKeys, error) {
+func GetForeignKeyTablesOfTable(db *sql.DB, table QualifiedTableName, includeSelfReferences bool) (TableForeignKeys, error) {
+	whereClause := squirrel.And{
+		squirrel.Eq{"CONSTRAINT_SCHEMA": table.SchemaName},
+		squirrel.Eq{"TABLE_NAME": table.TableName},
+	}
+	if !includeSelfReferences {
+		whereClause = squirrel.And{
+			whereClause,
+			squirrel.NotEq{"REFERENCED_TABLE_NAME": table.TableName},
+		}
+	}
 	rows, err := squirrel.
 		Select("UNIQUE_CONSTRAINT_SCHEMA", "REFERENCED_TABLE_NAME").
 		Distinct().
 		From("information_schema.REFERENTIAL_CONSTRAINTS").
-		Where(
-			squirrel.And{
-				squirrel.Eq{"CONSTRAINT_SCHEMA": table.SchemaName},
-				squirrel.Eq{"TABLE_NAME": table.TableName},
-			},
-		).
+		Where(whereClause).
 		RunWith(db.DB).
 		Query()
 	if err != nil {
