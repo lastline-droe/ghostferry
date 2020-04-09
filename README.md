@@ -91,6 +91,13 @@ Features/fixes added in this fork include
     - database/table name rewrites are not supported, as we would need non-
       trivial rewrites of schema changing statements when tables are altered,
       renamed, created, or deleted.
+- support [reading from (read-only) DB replica](https://github.com/Lastline-Inc/ghostferry/issues/22):
+  under certain conditions, replicating data from a DB slave may be safe and
+  required. Furthermore, it may not be possible to lock inserts on the source
+  from the context of ghostferry.
+  A set of optional flags allow disabling locking and checking for replication
+  delay when reading from the source, if the user knows that the operation is
+  safe.
 
 Overview of How it Works
 ------------------------

@@ -464,6 +464,35 @@ type Config struct {
 	// Optional: defaults to false
 	ReplicateSchemaChanges bool
 
+	// For migrating data, it is crucial that we're either reading from a master
+	// or from a slave that is up-to-date with its master. If we are just
+	// continuously replicating/streaming data, it's OK to work on an outdated
+	// upstream
+	//
+	// Optional: defaults to false
+	AllowReplicationFromReplica bool
+
+	// When copying a table with pagination, do not lock the source table for
+	// inserts. This may be an unsafe operation if the source table may be
+	// deleted from.
+	// Use only if the application guarantees that no rows are deleted from the
+	// tables that are copied with pagination.
+	//
+	// Optional: defaults to false
+	CopyPaginatedTablesWithoutLock bool
+
+	// When copying a table without pagination ("full table" copies), do not
+	// lock the source table for inserts. This is an unsafe operation if the
+	// source table may be deleted from, as the copy may skip over rows, but
+	// it may be a requirement if the source DB is read-only (and thus locking
+	// is not possible).
+	// Use only if the application guarantees that no rows are deleted from the
+	// tables that are copied without pagination, or if tables are smaller than
+	// the batch size (in which case no locking is needed).
+	//
+	// Optional: defaults to false
+	CopyUnpaginatedTablesWithoutLock bool
+
 	// This specifies whether or not Ferry.Run will handle SIGINT and SIGTERM
 	// by dumping the current state to stdout and the error HTTP callback.
 	// The dumped state can be used to resume Ghostferry.
