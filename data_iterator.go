@@ -251,13 +251,17 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 		return err
 	}
 
-	cursor := d.CursorConfig.NewPaginatedCursor(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+	var cursor *PaginatedCursor
 	if d.SelectFingerprint {
+		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+
 		if len(cursor.ColumnsToSelect) == 0 {
 			cursor.ColumnsToSelect = []string{"*"}
 		}
 
 		cursor.ColumnsToSelect = append(cursor.ColumnsToSelect, table.RowMd5Query())
+	} else {
+		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
 	}
 
 	err := cursor.Each(func(batch RowBatch) error {
