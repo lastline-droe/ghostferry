@@ -31,6 +31,6 @@
 
   "DBReadRetries": 3,
   "DumpStateOnSignal": false,
-  "ResumeStateFromTargetDB": "_ghostferry",
+  "ResumeStateFromDB": "_ghostferry",
   "ForceResumeStateUpdatesToDB": true
 }
