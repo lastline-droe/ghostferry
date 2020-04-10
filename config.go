@@ -417,6 +417,17 @@ type Config struct {
 	// Optional: defaults to 4
 	DataIterationConcurrency int
 
+	// If set to true, copy data by paginating in reverse order of the
+	// pagination key.
+	//
+	// This can be useful if the pagination key is indicative of the time of
+	// insert (higher key values indicate more recent data, such as auto-
+	// increment IDs) and the target should receive more recent data before
+	// older data.
+	//
+	// Optional: defaults to false
+	IterateInDescendingOrder bool
+
 	// This specifies if the data-iteration/copy should be delayed until the
 	// binlog-writer shuts down. This is needed if one wishes to let replication
 	// take care of temporary issues that may be preventing the data copy.
@@ -565,7 +576,7 @@ type Config struct {
 	//
 	// - If you are copying a table where the data is already partially on the
 	//   target through some other means.
-	//   - Specifically, the PaginationKey of this row on both the source and the target are
+	//   - Specifically, the VerifierPaginationKey of this row on both the source and the target are
 	//     the same. Thus, INSERT IGNORE will skip copying this row, leaving the
 	//     data on the target unchanged.
 	//   - If the data on the target is already identical to the source, then

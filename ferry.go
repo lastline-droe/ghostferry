@@ -257,6 +257,8 @@ func (f *Ferry) NewIterativeVerifier() (*IterativeVerifier, error) {
 			DB:          f.SourceDB,
 			BatchSize:   f.Config.DataIterationBatchSize,
 			ReadRetries: f.Config.DBReadRetries,
+
+			IterateInDescendingOrder: f.Config.IterateInDescendingOrder,
 		},
 
 		BinlogStreamer:      f.BinlogStreamer,
@@ -404,17 +406,6 @@ func (f *Ferry) Initialize() (err error) {
 		f.Throttler = &PauserThrottler{}
 	}
 
-	if f.StateToResumeFrom != nil {
-		f.StateTracker = NewStateTrackerFromSerializedState(f.DataIterationConcurrency*10, f.StateToResumeFrom)
-	} else if f.ResumeStateFromDB != "" {
-		f.StateTracker, f.StateToResumeFrom, err = NewStateTrackerFromTargetDB(f)
-		if err != nil {
-			return err
-		}
-	} else {
-		f.StateTracker = NewStateTracker(f.DataIterationConcurrency * 10)
-	}
-
 	// Loads the schema of the tables that are applicable.
 	// We need to do this at the beginning of the run as this is required
 	// in order to determine the PaginationKey of each table as well as finding
@@ -433,6 +424,20 @@ func (f *Ferry) Initialize() (err error) {
 		}
 	} else {
 		f.Tables = f.StateToResumeFrom.LastKnownTableSchemaCache
+	}
+
+	if f.StateToResumeFrom != nil {
+		f.StateTracker, err = NewStateTrackerFromSerializedState(f.DataIterationConcurrency*10, f.StateToResumeFrom, f.Tables)
+		if err != nil {
+			return err
+		}
+	} else if f.ResumeStateFromDB != "" {
+		f.StateTracker, f.StateToResumeFrom, err = NewStateTrackerFromTargetDB(f)
+		if err != nil {
+			return err
+		}
+	} else {
+		f.StateTracker = NewStateTracker(f.DataIterationConcurrency * 10)
 	}
 
 	// The iterative verifier needs the binlog streamer so this has to be first.
@@ -771,9 +776,9 @@ func (f *Ferry) Progress() *Progress {
 	// Table Progress
 	serializedState := f.StateTracker.Serialize(nil, nil)
 	s.Tables = make(map[string]TableProgress)
-	targetPaginationKeys := make(map[string]uint64)
+	targetPaginationKeys := make(map[string]*PaginationKeyData)
 	f.DataIterator.targetPaginationKeys.Range(func(k, v interface{}) bool {
-		targetPaginationKeys[k.(string)] = v.(uint64)
+		targetPaginationKeys[k.(string)] = v.(*PaginationKeyData)
 		return true
 	})
 
@@ -792,9 +797,19 @@ func (f *Ferry) Progress() *Progress {
 			currentAction = TableActionWaiting
 		}
 
+		lastPaginationValue := "n/a"
+		if lastSuccessfulPaginationKey != nil {
+			lastPaginationValue = lastSuccessfulPaginationKey.String()
+		}
+
+		targetPaginationValue := "n/a"
+		if targetPaginationKeys[tableName] != nil {
+			targetPaginationValue = targetPaginationKeys[tableName].String()
+		}
+
 		s.Tables[tableName] = TableProgress{
-			LastSuccessfulPaginationKey: lastSuccessfulPaginationKey,
-			TargetPaginationKey:         targetPaginationKeys[tableName],
+			LastSuccessfulPaginationKey: lastPaginationValue,
+			TargetPaginationKey:         targetPaginationValue,
 			CurrentAction:               currentAction,
 		}
 	}
@@ -804,11 +819,15 @@ func (f *Ferry) Progress() *Progress {
 	var completedPaginationKeys uint64 = 0
 	estimatedPaginationKeysPerSecond := f.StateTracker.EstimatedPaginationKeysPerSecond()
 	for _, targetPaginationKey := range targetPaginationKeys {
-		totalPaginationKeysToCopy += targetPaginationKey
+		if progress, ok := targetPaginationKey.ProgressData(); ok {
+			totalPaginationKeysToCopy += progress
+		}
 	}
 
 	for _, completedPaginationKey := range serializedState.LastSuccessfulPaginationKeys {
-		completedPaginationKeys += completedPaginationKey
+		if progress, ok := completedPaginationKey.ProgressData(); ok {
+			completedPaginationKeys += progress
+		}
 	}
 
 	s.ETA = (time.Duration(math.Ceil(float64(totalPaginationKeysToCopy-completedPaginationKeys)/estimatedPaginationKeysPerSecond)) * time.Second).Seconds()

@@ -1,12 +1,14 @@
 require "test_helper"
 
 class FullTableCopyTest < GhostferryTestCase
-  def test_reject_table_with_string_primary_key
-    define_test_table_with_data("data varchar(32), primary key(data)")
+  def test_reject_table_with_unsupported_primary_key_type
+    source_db.query("CREATE DATABASE IF NOT EXISTS #{DEFAULT_DB}")
+    source_db.query("CREATE TABLE IF NOT EXISTS #{DEFAULT_FULL_TABLE_NAME} (data float, primary key(data))")
+    source_db.query("INSERT INTO #{DEFAULT_FULL_TABLE_NAME} (data) VALUES (1.2), (3.4)")
 
     ghostferry = new_ghostferry(MINIMAL_GHOSTFERRY)
     _, stderr = ghostferry.run_expecting_crash
-    assert_includes stderr, "panic: Pagination Key `data` for `gftest`.`test_table_1` is non-numeric"
+    assert_includes stderr, "panic: Pagination Key `data` for `gftest`.`test_table_1` is non-numeric/-text"
   end
 
   def test_reject_table_without_primary_key

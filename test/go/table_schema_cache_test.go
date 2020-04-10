@@ -30,10 +30,13 @@ func dropTestTables(this *TableSchemaCacheTestSuite) {
 	}
 }
 
-func (t *TableSchemaCacheTestSuite) assertLoadTablesWithCascadingPaginationColumnConfig(table, expectedpaginationColumn string, cascadingPaginationColumnConfig *ghostferry.CascadingPaginationColumnConfig) {
+func (t *TableSchemaCacheTestSuite) assertLoadTablesWithCascadingPaginationColumnConfig(table string, expectedPaginationKeyColumns []string, cascadingPaginationColumnConfig *ghostferry.CascadingPaginationColumnConfig) {
 	tableSchemaCache, err := ghostferry.LoadTables(t.Ferry.SourceDB, t.tableFilter, nil, nil, cascadingPaginationColumnConfig)
-	actual := tableSchemaCache.Get(testhelpers.TestSchemaName, table).PaginationKeyColumn.Name
-	t.Require().Equal(expectedpaginationColumn, actual)
+	actual := tableSchemaCache.Get(testhelpers.TestSchemaName, table).PaginationKey
+	t.Require().Equal(len(expectedPaginationKeyColumns), len(actual.Columns))
+	for i, columnName := range expectedPaginationKeyColumns {
+		t.Require().Equal(columnName, actual.Columns[i].Name)
+	}
 	t.Require().Nil(err)
 }
 
@@ -83,17 +86,17 @@ func (this *TableSchemaCacheTestSuite) TestLoadTablesWithoutFiltering() {
 	}
 }
 
-func (this *TableSchemaCacheTestSuite) TestLoadTablesRejectTablesWithoutNumericPK() {
+func (this *TableSchemaCacheTestSuite) TestLoadTablesRejectTablesWithUnsupportedPK() {
 	table := "test_table_4"
 	paginationColumn := "id"
-	query := fmt.Sprintf("CREATE TABLE %s.%s (%s varchar(20) not null, data TEXT, primary key(%s))", testhelpers.TestSchemaName, table, paginationColumn, paginationColumn)
+	query := fmt.Sprintf("CREATE TABLE %s.%s (%s float not null, data TEXT, primary key(%s))", testhelpers.TestSchemaName, table, paginationColumn, paginationColumn)
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
 
 	_, err = ghostferry.LoadTables(this.Ferry.SourceDB, this.tableFilter, nil, nil, nil)
 
 	this.Require().NotNil(err)
-	this.Require().EqualError(err, ghostferry.NonNumericPaginationKeyError(testhelpers.TestSchemaName, table, paginationColumn).Error())
+	this.Require().EqualError(err, ghostferry.UnsupportedPaginationKeyError(testhelpers.TestSchemaName, table, paginationColumn).Error())
 	this.Require().Contains(err.Error(), table)
 }
 
@@ -111,7 +114,7 @@ func (this *TableSchemaCacheTestSuite) TestLoadTablesCascadingPaginationColumnCo
 	query := fmt.Sprintf("CREATE TABLE %s.%s (%s bigint(20) not null, data TEXT)", testhelpers.TestSchemaName, table, paginationColumn)
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
-	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, paginationColumn, cascadingPaginationColumnConfig)
+	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, []string{paginationColumn}, cascadingPaginationColumnConfig)
 }
 func (this *TableSchemaCacheTestSuite) TestLoadTablesCascadingPaginationColumnConfigRightScenario2() {
 	dropTestTables(this) // needed because the default tables created at test setup interfere with this test
@@ -126,7 +129,7 @@ func (this *TableSchemaCacheTestSuite) TestLoadTablesCascadingPaginationColumnCo
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
 
-	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, fallbackColumn, cascadingPaginationColumnConfig)
+	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, []string{fallbackColumn}, cascadingPaginationColumnConfig)
 }
 
 func (this *TableSchemaCacheTestSuite) TestLoadTablesCascadingPaginationColumnConfigUsesPKBeforeFallback() {
@@ -142,7 +145,7 @@ func (this *TableSchemaCacheTestSuite) TestLoadTablesCascadingPaginationColumnCo
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
 
-	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, "id", cascadingPaginationColumnConfig)
+	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, []string{"id"}, cascadingPaginationColumnConfig)
 }
 
 func (this *TableSchemaCacheTestSuite) TestLoadTablesRejectTablesWhenCascadingPaginationColumnConfigWrong() {
@@ -206,39 +209,23 @@ func (this *TableSchemaCacheTestSuite) TestLoadTablesRejectTablesWithoutPKColumn
 	this.Require().EqualError(err, ghostferry.NonExistingPaginationKeyError(testhelpers.TestSchemaName, table).Error())
 }
 
-func (this *TableSchemaCacheTestSuite) TestLoadTablesRejectTablesWithCompositePKButNoAlternateColumnToFallBackTo() {
-	table := "composite_pk_without_fallback"
-	query := fmt.Sprintf("CREATE TABLE %s.%s (identity bigint(20) not null, other_id bigint(20) not null, data TEXT, primary key(identity, other_id))", testhelpers.TestSchemaName, table)
+func (this *TableSchemaCacheTestSuite) TestLoadTablesWithStringPK() {
+	table := "test_table_4"
+	paginationColumn := "id"
+	query := fmt.Sprintf("CREATE TABLE %s.%s (%s varchar(20) not null, data TEXT, primary key(%s))", testhelpers.TestSchemaName, table, paginationColumn, paginationColumn)
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
 
-	_, err = ghostferry.LoadTables(this.Ferry.SourceDB, this.tableFilter, nil, nil, nil)
-
-	this.Require().NotNil(err)
-	this.Require().EqualError(err, ghostferry.NonExistingPaginationKeyError(testhelpers.TestSchemaName, table).Error())
+	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, []string{"id"}, nil)
 }
 
-func (this *TableSchemaCacheTestSuite) TestLoadTablesWithCompositePKButIDColumnToFallBackTo() {
-	table := "composite_pk_with_id_fallback"
-	paginationColumn := "id"
-	cascadingPaginationColumnConfig := &ghostferry.CascadingPaginationColumnConfig{
-		PerTable: map[string]map[string]string{
-			testhelpers.TestSchemaName: map[string]string{
-				table: paginationColumn,
-			},
-		},
-	}
-
+func (this *TableSchemaCacheTestSuite) TestLoadTablesWithCompositePK() {
+	table := "composite_pk"
 	query := fmt.Sprintf("CREATE TABLE %s.%s (identity bigint(20) not null, id bigint(20) not null, data TEXT, primary key(identity, id))", testhelpers.TestSchemaName, table)
 	_, err := this.Ferry.SourceDB.Exec(query)
 	this.Require().Nil(err)
 
-	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, paginationColumn, cascadingPaginationColumnConfig)
-
-	cascadingPaginationColumnConfig = &ghostferry.CascadingPaginationColumnConfig{
-		FallbackColumn: paginationColumn,
-	}
-	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, paginationColumn, cascadingPaginationColumnConfig)
+	this.assertLoadTablesWithCascadingPaginationColumnConfig(table, []string{"identity", "id"}, nil)
 }
 
 func (this *TableSchemaCacheTestSuite) TestAllTableNames() {
@@ -298,12 +285,14 @@ func (this *TableSchemaCacheTestSuite) TestFingerprintQuery() {
 
 	tables := tableSchemaCache.AsSlice()
 	table := tables[0]
-	query := table.FingerprintQuery("s", "t", 10)
+	query, err := table.FingerprintQuery("s", "t", 10)
+	this.Require().Nil(err)
 	this.Require().Equal("SELECT `id`,MD5(CONCAT(MD5(COALESCE(`id`, 'NULL_PBj}b]74P@JTo$5G_null')),MD5(COALESCE(`data`, 'NULL_PBj}b]74P@JTo$5G_null')))) AS __ghostferry_row_md5 FROM `s`.`t` WHERE `id` IN (?,?,?,?,?,?,?,?,?,?)", query)
 
 	table = tables[1]
 	table.CompressedColumnsForVerification = map[string]string{"data": "SNAPPY"}
-	query = table.FingerprintQuery("s", "t", 10)
+	query, err = table.FingerprintQuery("s", "t", 10)
+	this.Require().Nil(err)
 	this.Require().Equal("SELECT `id`,MD5(CONCAT(MD5(COALESCE(`id`, 'NULL_PBj}b]74P@JTo$5G_null')))) AS __ghostferry_row_md5,`data` FROM `s`.`t` WHERE `id` IN (?,?,?,?,?,?,?,?,?,?)", query)
 }
 
@@ -331,7 +320,8 @@ func (this *TableSchemaCacheTestSuite) TestFingerprintQueryWithIgnoredColumns() 
 	table.IgnoredColumnsForVerification = map[string]struct{}{
 		"data": struct{}{},
 	}
-	query := table.FingerprintQuery("s", "t", 10)
+	query, err := table.FingerprintQuery("s", "t", 10)
+	this.Require().Nil(err)
 	this.Require().Equal("SELECT `id`,MD5(CONCAT(MD5(COALESCE(`id`, 'NULL_PBj}b]74P@JTo$5G_null')))) AS __ghostferry_row_md5 FROM `s`.`t` WHERE `id` IN (?,?,?,?,?,?,?,?,?,?)", query)
 }
 

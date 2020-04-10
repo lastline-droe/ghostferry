@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -317,12 +316,16 @@ func (v *IterativeVerifier) GetHashes(db *sql.DB, schema, table, paginationKeyCo
 			return nil, err
 		}
 
-		paginationKey, err := rowData.GetUint64(0)
+		paginationKey, err := rowData.GetInt64(0)
 		if err != nil {
 			return nil, err
 		}
 
-		resultSet[paginationKey] = rowData[1].([]byte)
+		if paginationKey < 0 {
+			return nil, fmt.Errorf("table %s uses a signed pagination key", table)
+		}
+
+		resultSet[uint64(paginationKey)] = rowData[1].([]byte)
 	}
 	return resultSet, nil
 }
@@ -386,10 +389,10 @@ func (v *IterativeVerifier) iterateAllTables(mismatchedPaginationKeyFunc func(ui
 func (v *IterativeVerifier) iterateTableFingerprints(table *TableSchema, mismatchedPaginationKeyFunc func(uint64, *TableSchema) error) error {
 	// The cursor will stop iterating when it cannot find anymore rows,
 	// so it will not iterate until MaxUint64.
-	cursor := v.CursorConfig.NewPaginatedCursorWithoutRowLock(table, 0, math.MaxUint64)
+	cursor := v.CursorConfig.NewPaginatedCursorWithoutRowLock(table, nil, nil)
 
 	// It only needs the PaginationKeys, not the entire row.
-	cursor.ColumnsToSelect = []string{fmt.Sprintf("`%s`", table.GetPaginationColumn().Name)}
+	cursor.ColumnsToSelect = []string{fmt.Sprintf("`%s`", table.PaginationKey.Columns[0].Name)}
 	return cursor.Each(func(rowBatch RowBatch) error {
 		var batch InsertRowBatch
 		var ok bool
@@ -404,8 +407,8 @@ func (v *IterativeVerifier) iterateTableFingerprints(table *TableSchema, mismatc
 
 		paginationKeys := make([]uint64, 0, batch.Size())
 
-		for _, rowData := range batch.Values() {
-			paginationKey, err := rowData.GetUint64(batch.PaginationKeyIndex())
+		for i, _ := range batch.Values() {
+			paginationKey, err := batch.VerifierPaginationKey(i)
 			if err != nil {
 				return err
 			}
@@ -548,7 +551,7 @@ func (v *IterativeVerifier) binlogEventListener(event *ReplicationEvent) error {
 	// longer applies
 	if ev, ok := event.BinlogEvent.Event.(*replication.RowsEvent); ok {
 		table := v.TableSchemaCache.Get(string(ev.Table.Schema), string(ev.Table.Table))
-		if table == nil || v.tableIsIgnored(table) || table.PaginationKeyColumn == nil {
+		if table == nil || v.tableIsIgnored(table) || table.PaginationKey == nil {
 			if IncrediblyVerboseLogging {
 				v.logger.Debugf("Ignoring binlog event for %s.%s", ev.Table.Schema, ev.Table.Table)
 			}
@@ -572,7 +575,7 @@ func (v *IterativeVerifier) binlogEventListener(event *ReplicationEvent) error {
 				}
 			}
 
-			paginationKey, err := dmlEv.PaginationKey()
+			paginationKey, err := dmlEv.VerifierPaginationKey()
 			if err != nil {
 				return err
 			}
@@ -585,7 +588,7 @@ func (v *IterativeVerifier) binlogEventListener(event *ReplicationEvent) error {
 }
 
 func (v *IterativeVerifier) tableIsIgnored(table *TableSchema) bool {
-	if table.GetPaginationColumn() == nil {
+	if table.PaginationKey == nil {
 		return true
 	}
 
@@ -633,7 +636,7 @@ func (v *IterativeVerifier) compareFingerprints(paginationKeys []uint64, table *
 	go func() {
 		defer wg.Done()
 		sourceErr = WithRetries(5, 0, v.logger, "get fingerprints from source db", func() (err error) {
-			sourceHashes, err = v.GetHashes(v.SourceDB, table.Schema, table.Name, table.GetPaginationColumn().Name, v.columnsToVerify(table), paginationKeys)
+			sourceHashes, err = v.GetHashes(v.SourceDB, table.Schema, table.Name, table.PaginationKey.Columns[0].Name, v.columnsToVerify(table), paginationKeys)
 			return
 		})
 	}()
@@ -643,7 +646,7 @@ func (v *IterativeVerifier) compareFingerprints(paginationKeys []uint64, table *
 	go func() {
 		defer wg.Done()
 		targetErr = WithRetries(5, 0, v.logger, "get fingerprints from target db", func() (err error) {
-			targetHashes, err = v.GetHashes(v.TargetDB, targetDb, targetTable, table.GetPaginationColumn().Name, v.columnsToVerify(table), paginationKeys)
+			targetHashes, err = v.GetHashes(v.TargetDB, targetDb, targetTable, table.PaginationKey.Columns[0].Name, v.columnsToVerify(table), paginationKeys)
 			return
 		})
 	}()
@@ -665,12 +668,12 @@ func (v *IterativeVerifier) compareFingerprints(paginationKeys []uint64, table *
 }
 
 func (v *IterativeVerifier) compareCompressedHashes(targetDb, targetTable string, table *TableSchema, paginationKeys []uint64) ([]uint64, error) {
-	sourceHashes, err := v.CompressionVerifier.GetCompressedHashes(v.SourceDB, table.Schema, table.Name, table.GetPaginationColumn().Name, v.columnsToVerify(table), paginationKeys)
+	sourceHashes, err := v.CompressionVerifier.GetCompressedHashes(v.SourceDB, table.Schema, table.Name, table.PaginationKey.Columns[0].Name, v.columnsToVerify(table), paginationKeys)
 	if err != nil {
 		return nil, err
 	}
 
-	targetHashes, err := v.CompressionVerifier.GetCompressedHashes(v.TargetDB, targetDb, targetTable, table.GetPaginationColumn().Name, v.columnsToVerify(table), paginationKeys)
+	targetHashes, err := v.CompressionVerifier.GetCompressedHashes(v.TargetDB, targetDb, targetTable, table.PaginationKey.Columns[0].Name, v.columnsToVerify(table), paginationKeys)
 	if err != nil {
 		return nil, err
 	}

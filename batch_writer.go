@@ -48,7 +48,7 @@ func (w *BatchWriter) WriteRowBatch(batch RowBatch) error {
 		}
 
 		if batch.Size() == 0 {
-			w.logger.Debug("ignoring empty row-batch for %s.%s", db, table)
+			w.logger.Debugf("ignoring empty row-batch for %s.%s", db, table)
 			return
 		}
 
@@ -97,7 +97,7 @@ func (w *BatchWriter) WriteRowBatch(batch RowBatch) error {
 				txInUse = true
 			}
 
-			if w.StateTracker != nil {
+			if w.StateTracker != nil && endPaginationKeypos != nil{
 				defer func() {
 					if err == nil {
 						w.StateTracker.UpdateLastSuccessfulPaginationKey(stateTableName, endPaginationKeypos)
@@ -148,21 +148,20 @@ func (w *BatchWriter) WriteRowBatch(batch RowBatch) error {
 	})
 }
 
-func (w *BatchWriter) handleInsertRowBatch(tx *sql.Tx, batch InsertRowBatch, db, table string) (endPaginationKeypos uint64, txUpdated bool, err error) {
-	if !batch.ValuesContainPaginationKey() {
-		return
-	}
+func (w *BatchWriter) handleInsertRowBatch(tx *sql.Tx, batch InsertRowBatch, db, table string) (endPaginationKeypos *PaginationKeyData, txUpdated bool, err error) {
+	var startPaginationKeypos *PaginationKeyData
+	paginationKey := batch.TableSchema().PaginationKey
+	if paginationKey != nil {
+		values := batch.Values()
+		startPaginationKeypos, err = NewPaginationKeyDataFromRow(values[0], paginationKey)
+		if err != nil {
+			return
+		}
 
-	values := batch.Values()
-	index := batch.PaginationKeyIndex()
-	startPaginationKeypos, err := values[0].GetUint64(index)
-	if err != nil {
-		return
-	}
-
-	endPaginationKeypos, err = values[len(values)-1].GetUint64(index)
-	if err != nil {
-		return
+		endPaginationKeypos, err = NewPaginationKeyDataFromRow(values[len(values)-1], paginationKey)
+		if err != nil {
+			return
+		}
 	}
 
 	if w.InlineVerifier != nil {
@@ -177,7 +176,7 @@ func (w *BatchWriter) handleInsertRowBatch(tx *sql.Tx, batch InsertRowBatch, db,
 		}
 	}
 
-	if w.StateTracker != nil {
+	if w.StateTracker != nil && endPaginationKeypos != nil{
 		// Note that the state tracker expects us the track based on the original
 		// database and table names as opposed to the target ones.
 		//

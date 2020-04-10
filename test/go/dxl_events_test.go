@@ -26,7 +26,7 @@ func (this *DMLEventsTestSuite) SetupTest() {
 	}
 
 	columns := []schema.TableColumn{
-		{Name: "col1"},
+		{Name: "col1", Type: schema.TYPE_NUMBER},
 		{Name: "col2"},
 		{Name: "col3"},
 	}
@@ -37,6 +37,7 @@ func (this *DMLEventsTestSuite) SetupTest() {
 			Name:    "test_table",
 			Columns: columns,
 		},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
 	}
 
 	this.targetTable = &ghostferry.TableSchema{
@@ -45,6 +46,7 @@ func (this *DMLEventsTestSuite) SetupTest() {
 			Name:    "target_table",
 			Columns: columns,
 		},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
 	}
 
 	this.tableSchemaCache = map[string]*ghostferry.TableSchema{
@@ -283,9 +285,10 @@ func (this *DMLEventsTestSuite) testPaginationKey(rows [][]interface{}) uint64 {
 	}
 	dmlEvents, _ := ghostferry.NewBinlogInsertEvents(this.sourceTable, rowsEvent, ghostferry.BinlogPosition{}, time.Now())
 
-	pagintionKey, err := dmlEvents[0].PaginationKey()
+	paginationKey, err := dmlEvents[0].VerifierPaginationKey()
 	this.Require().Nil(err)
-	return pagintionKey
+	this.Require().NotNil(paginationKey)
+	return paginationKey
 }
 
 func (this *DMLEventsTestSuite) TestPaginationKeyForInt() {

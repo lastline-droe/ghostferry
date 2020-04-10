@@ -32,18 +32,158 @@ type SqlPreparerAndRollbacker interface {
 	Rollback() error
 }
 
+type PaginationKeyData struct {
+	// The Values is the subset of column values of a full row that makes up
+	// the pagination key. The list is stored in the same way as the pagination
+	// key column itself
+	Values        RowData
+	paginationKey *PaginationKey
+}
+
+func NewPaginationKeyDataFromRow(row RowData, paginationKey *PaginationKey) (paginationKeyData *PaginationKeyData, err error) {
+	values := make(RowData, len(paginationKey.Columns))
+	for i, column := range paginationKey.Columns {
+		// NOTE: The data we get from the MySQL driver can be all over the
+		// place, so it's really important we know what we are casting the
+		// value to
+		if column.Type == schema.TYPE_NUMBER {
+			value, err := row.GetInt64(paginationKey.ColumnIndices[i])
+			if err != nil {
+				return nil, err
+			}
+			values[i] = value
+		} else if column.Type == schema.TYPE_STRING {
+			values[i] = row.GetString(paginationKey.ColumnIndices[i])
+		} else {
+			value := row[paginationKey.ColumnIndices[i]]
+			return nil, fmt.Errorf("unsupported primary key type %T (%v) in %s", value, value, paginationKey)
+		}
+	}
+	paginationKeyData = &PaginationKeyData{
+		Values:        values,
+		paginationKey: paginationKey,
+	}
+
+	return
+}
+
+func UnmarshalPaginationKeyData(keyData *PaginationKeyData, table *TableSchema) (paginationKeyData *PaginationKeyData, err error) {
+	// build a dummy row of the original table, filled in with the pagination
+	// key data, which we then import using the regular method above
+	row := make(RowData, len(table.Columns))
+	for i, columnIndex := range table.PaginationKey.ColumnIndices {
+		value := keyData.Values[i]
+		// we need to support a few more types that the JSON unmarshalling
+		// infers incorrectly
+		switch v := value.(type) {
+		case float64:
+			value = int(v)
+		case float32:
+			value = int(v)
+		}
+		row[columnIndex] = value
+	}
+	return NewPaginationKeyDataFromRow(row, table.PaginationKey)
+}
+
+func (d PaginationKeyData) String() string {
+	s := ""
+	if d.Values != nil {
+		for i, value := range d.Values {
+			if i > 0 {
+				s += ","
+			}
+			var format string
+			switch value.(type) {
+			case int:
+				format = "%d"
+			case string:
+				format = "%s"
+			default:
+				format = "%v"
+			}
+			s += fmt.Sprintf(format, value)
+		}
+	}
+	return s
+}
+
+// for some types of keys, we can estimate the progress of pagination by
+// comparing the most significant part of the key to the target pagination
+// value. It's only a rough esitmate, as it assume a linear distribution of
+// values between 0 and the target (no negative values, no holes/jumps, etc)
+// and cannot work for non-integer keys, but it's nevertheless useful
+func (d PaginationKeyData) ProgressData() (progress uint64, exists bool) {
+	if d.Values == nil || d.paginationKey.MostSignificantColumnIndex < 0 {
+		return 0, false
+	}
+
+	value, ok := d.Values[d.paginationKey.MostSignificantColumnIndex].(int64)
+	if ok && value >= 0 {
+		return uint64(value), true
+	}
+	return 0, false
+}
+
+func (d *PaginationKeyData) Compare(other *PaginationKeyData) int {
+	// mimic comparisons of uninitialized structures as we would for
+	// integers (as it was before we supported composite keys): nil
+	// values are equal to themselves, and an uninitialized value is
+	// always lower than an initialized one
+	if d == nil {
+		if other == nil {
+			return 0
+		}
+		return -1
+	} else if other == nil {
+		return 1
+	}
+
+	// NOTE: This works because we SELECT ... ORDER BY by the same ordering
+	for i, value := range d.Values {
+		if dValue, ok := value.(int64); ok {
+			otherValue, ok := other.Values[i].(int64)
+			if !ok {
+				panic(fmt.Errorf("comparing incompatible primary key types %T and %T", d.Values[i], other.Values[i]))
+			}
+			if dValue < otherValue {
+				return -1
+			} else if dValue > otherValue {
+				return 1
+			}
+		} else if dValue, ok := value.(string); ok {
+			otherValue, ok := other.Values[i].(string)
+			if !ok {
+				panic(fmt.Errorf("comparing incompatible primary key types %T and %T", d.Values[i], other.Values[i]))
+			}
+			if dValue < otherValue {
+				return -1
+			} else if dValue > otherValue {
+				return 1
+			}
+		} else {
+			// panic, because we should never have gotten here, as we validate
+			// on struct creation
+			panic(fmt.Errorf("unsupported primary key type %T ('%v') in %s", value, value, d))
+		}
+	}
+	return 0
+}
+
 type CursorConfig struct {
 	DB        *sql.DB
 	Throttler Throttler
 
 	ColumnsToSelect []string
-	BuildSelect     func([]string, *TableSchema, uint64, uint64) (squirrel.SelectBuilder, error)
+	BuildSelect     func([]string, *TableSchema, *PaginationKeyData, uint64) (squirrel.SelectBuilder, error)
 	BatchSize       uint64
 	ReadRetries     int
+
+	IterateInDescendingOrder bool
 }
 
 // returns a new PaginatedCursor with an embedded copy of itself
-func (c *CursorConfig) NewPaginatedCursor(table *TableSchema, startPaginationKey, maxPaginationKey uint64) *PaginatedCursor {
+func (c *CursorConfig) NewPaginatedCursor(table *TableSchema, startPaginationKey, maxPaginationKey *PaginationKeyData) *PaginatedCursor {
 	return &PaginatedCursor{
 		CursorConfig:                *c,
 		Table:                       table,
@@ -54,7 +194,7 @@ func (c *CursorConfig) NewPaginatedCursor(table *TableSchema, startPaginationKey
 }
 
 // returns a new PaginatedCursor with an embedded copy of itself
-func (c *CursorConfig) NewPaginatedCursorWithoutRowLock(table *TableSchema, startPaginationKey, maxPaginationKey uint64) *PaginatedCursor {
+func (c *CursorConfig) NewPaginatedCursorWithoutRowLock(table *TableSchema, startPaginationKey, maxPaginationKey *PaginationKeyData) *PaginatedCursor {
 	cursor := c.NewPaginatedCursor(table, startPaginationKey, maxPaginationKey)
 	cursor.RowLock = false
 	return cursor
@@ -64,11 +204,11 @@ type PaginatedCursor struct {
 	CursorConfig
 
 	Table            *TableSchema
-	MaxPaginationKey uint64
+	MaxPaginationKey *PaginationKeyData
 	RowLock          bool
 
-	paginationKeyColumn         *schema.TableColumn
-	lastSuccessfulPaginationKey uint64
+	paginationKeyColumn         *PaginationKey
+	lastSuccessfulPaginationKey *PaginationKeyData
 	logger                      *logrus.Entry
 }
 
@@ -77,16 +217,23 @@ func (c *PaginatedCursor) Each(f func(RowBatch) error) error {
 		"table": c.Table.String(),
 		"tag":   "cursor",
 	})
-	c.paginationKeyColumn = c.Table.GetPaginationColumn()
+	c.paginationKeyColumn = c.Table.PaginationKey
 
 	if len(c.ColumnsToSelect) == 0 {
 		c.ColumnsToSelect = []string{"*"}
 	}
 
-	for c.lastSuccessfulPaginationKey < c.MaxPaginationKey {
+	for {
+		if c.lastSuccessfulPaginationKey != nil {
+			status := c.lastSuccessfulPaginationKey.Compare(c.MaxPaginationKey)
+			if c.IterateInDescendingOrder && status <= 0 || !c.IterateInDescendingOrder && status >= 0 {
+				break
+			}
+		}
+
 		var tx SqlPreparerAndRollbacker
 		var batch InsertRowBatch
-		var paginationKeypos uint64
+		var paginationKeypos *PaginationKeyData
 
 		err := WithRetries(c.ReadRetries, 0, c.logger, "fetch rows", func() (err error) {
 			if c.Throttler != nil {
@@ -124,11 +271,18 @@ func (c *PaginatedCursor) Each(f func(RowBatch) error) error {
 			break
 		}
 
-		if paginationKeypos <= c.lastSuccessfulPaginationKey {
-			tx.Rollback()
-			err = fmt.Errorf("new paginationKeypos %d <= lastSuccessfulPaginationKey %d", paginationKeypos, c.lastSuccessfulPaginationKey)
-			c.logger.WithError(err).Errorf("last successful paginationKey position did not advance")
-			return err
+		if c.lastSuccessfulPaginationKey != nil {
+			progress := paginationKeypos.Compare(c.lastSuccessfulPaginationKey)
+			if c.IterateInDescendingOrder && progress >= 0 || !c.IterateInDescendingOrder && progress <= 0 {
+				tx.Rollback()
+				failedOperator := "<="
+				if c.IterateInDescendingOrder {
+					failedOperator = ">="
+				}
+				err = fmt.Errorf("new %s paginationKeypos %s %s lastSuccessfulPaginationKey %s (%d)", c.Table, paginationKeypos, failedOperator, c.lastSuccessfulPaginationKey, progress)
+				c.logger.WithError(err).Errorf("last successful paginationKey position did not advance")
+				return err
+			}
 		}
 
 		err = f(batch)
@@ -157,7 +311,7 @@ func (c *PaginatedCursor) Each(f func(RowBatch) error) error {
 	return nil
 }
 
-func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginationKeypos uint64, err error) {
+func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginationKeyData *PaginationKeyData, err error) {
 	var selectBuilder squirrel.SelectBuilder
 
 	if c.BuildSelect != nil {
@@ -167,7 +321,7 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 			return
 		}
 	} else {
-		selectBuilder = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize)
+		selectBuilder = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, true)
 	}
 
 	if c.RowLock {
@@ -191,6 +345,9 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 		"sql":  loggedQuery,
 		"args": args,
 	})
+	if IncrediblyVerboseLogging {
+		logger.Debugf("full query: %s [%v]", query, args)
+	}
 
 	// This query must be a prepared query. If it is not, querying will use
 	// MySQL's plain text interface, which will scan all values into []uint8
@@ -217,20 +374,6 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 		return
 	}
 
-	var paginationKeyIndex int = -1
-	for idx, col := range columns {
-		if col == c.paginationKeyColumn.Name {
-			paginationKeyIndex = idx
-			break
-		}
-	}
-
-	if paginationKeyIndex < 0 {
-		err = fmt.Errorf("paginationKey is not found during iteration with columns: %v", columns)
-		logger.WithError(err).Error("failed to get paginationKey index")
-		return
-	}
-
 	var rowData RowData
 	var batchData []RowData
 
@@ -250,14 +393,14 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 	}
 
 	if len(batchData) > 0 {
-		paginationKeypos, err = batchData[len(batchData)-1].GetUint64(paginationKeyIndex)
+		paginationKeyData, err = NewPaginationKeyDataFromRow(batchData[len(batchData)-1], c.paginationKeyColumn)
 		if err != nil {
-			logger.WithError(err).Error("failed to get uint64 paginationKey value")
+			logger.WithError(err).Error("failed to get paginationKey data")
 			return
 		}
 	}
 
-	batch = NewDataRowBatchWithPaginationKey(c.Table, batchData, paginationKeyIndex)
+	batch = NewDataRowBatch(c.Table, batchData)
 	logger.Debugf("found %d/%d rows", batch.Size(), c.BatchSize)
 
 	return
@@ -463,12 +606,95 @@ func ScanByteRow(rows *sqlorig.Rows, columnCount int) ([][]byte, error) {
 	return values, err
 }
 
-func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey, batchSize uint64) squirrel.SelectBuilder {
-	quotedPaginationKey := quoteField(table.GetPaginationColumn().Name)
+func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey *PaginationKeyData, batchSize uint64, sortAscending bool) squirrel.SelectBuilder {
+	stmt := squirrel.Select(columns...).
+		From(QuotedTableName(table))
 
-	return squirrel.Select(columns...).
-		From(QuotedTableName(table)).
-		Where(squirrel.Gt{quotedPaginationKey: lastPaginationKey}).
+	// selecting a resume position in the context of composite primary keys is
+	// not entirely trivial: consider a composite key of A+B and the following
+	// example table:
+	//
+	//    +---+---+
+	//    | A | B |
+	//    +---+---+
+	//    | 1 | 1 |
+	//    | 1 | 2 |
+	//    | 1 | 3 |
+	//    | 2 | 1 |
+	//    | 3 | 4 |
+	//    +---+---+
+	//
+	// and a batch-size of 2, we will want to copy batches
+	//
+	//    [(1,1), (1,2)]
+	//    [(1,3), (2,1)]
+	//
+	// If we select a naive implementation that simply selects >= on all parts
+	// of the composite key - e.g., for the second batch
+	//
+	//     A >= 1 AND B > 2
+	//
+	// or, using an offset,
+	//
+	//     A >= 1 AND B >= 2 OFFSET 1
+	//
+	// we would skip copying row with A=2.
+	//
+	// To work around this, we have to build a select using all parts of the
+	// key, such as
+	//
+	//     A > 1 OR A == 1 AND B > 2
+	//
+	// to allow proper resuming
+	if lastPaginationKey != nil {
+		// unfortunately squirrel does not allow to build structures very
+		// nicely, so we have to build an actual prepared SQL statement
+		whereSql := ""
+		args := make([]interface{}, 0)
+		for maxIndexToInclude, _ := range table.PaginationKey.Columns {
+			// build an AND-connected term for all columns up to the limit
+			andSql := ""
+			for i, column := range table.PaginationKey.Columns {
+				if i > maxIndexToInclude {
+					break
+				}
+
+				if i > 0 {
+					andSql += " AND "
+				}
+
+				andSql += quoteField(column.Name)
+				if i < maxIndexToInclude {
+					andSql += "="
+				} else if sortAscending {
+					andSql += ">"
+				} else {
+					andSql += "<"
+				}
+				andSql += "?"
+				args = append(args, lastPaginationKey.Values[i])
+			}
+			// now connect the different terms using OR
+			if whereSql != "" {
+				whereSql += " OR "
+			}
+			whereSql += andSql
+		}
+		stmt = stmt.Where(whereSql, args...)
+	}
+
+	// NOTE: It's important to sort in the order of the pagination key columns.
+	// This not only allows the correct resume but also for finding at what
+	// point we can stop a copy (see the PaginationKey.Compare())
+	orderBy := make([]string, len(table.PaginationKey.Columns))
+	for i, column := range table.PaginationKey.Columns {
+		orderBy[i] = quoteField(column.Name)
+		if !sortAscending {
+			orderBy[i] += " DESC"
+		}
+	}
+
+	return stmt.
 		Limit(batchSize).
-		OrderBy(quotedPaginationKey)
+		OrderBy(orderBy...)
 }

@@ -3,7 +3,6 @@ package ghostferry
 import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
-	"math"
 	"sync"
 
 	"github.com/sirupsen/logrus"
@@ -40,6 +39,8 @@ func NewDataIterator(f *Ferry) *DataIterator {
 
 			BatchSize:   f.Config.DataIterationBatchSize,
 			ReadRetries: f.Config.DBReadRetries,
+
+			IterateInDescendingOrder: f.Config.IterateInDescendingOrder,
 		},
 		StateTracker: f.StateTracker,
 
@@ -241,15 +242,16 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 	logger := d.logger.WithField("table", table.String())
 
-	targetPaginationKeyInterface, found := d.targetPaginationKeys.Load(table.String())
+	targetPaginationKeyDataInterface, found := d.targetPaginationKeys.Load(table.String())
 	if !found {
 		err := fmt.Errorf("%s not found in targetPaginationKeys, this is likely a programmer error", table.String())
 		logger.WithError(err).Error("this is definitely a bug")
 		return err
 	}
+	targetPaginationKeyData := targetPaginationKeyDataInterface.(*PaginationKeyData)
 
-	startPaginationKey := d.StateTracker.LastSuccessfulPaginationKey(table.String())
-	if startPaginationKey == math.MaxUint64 {
+	startPaginationKeyData, completed := d.StateTracker.LastSuccessfulPaginationKey(table.String())
+	if completed {
 		err := fmt.Errorf("%v has been marked as completed but a table iterator has been spawned, this is likely a programmer error which resulted in the inconsistent starting state", table.String())
 		logger.WithError(err).Error("this is definitely a bug")
 		return err
@@ -257,9 +259,9 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 
 	var cursor *PaginatedCursor
 	if d.lockTableForPaginatedCopy {
-		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKeyData, targetPaginationKeyData)
 	} else {
-		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKeyData, targetPaginationKeyData)
 	}
 	if d.SelectFingerprint {
 		if len(cursor.ColumnsToSelect) == 0 {
@@ -281,7 +283,7 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 				rows := make([]RowData, batch.Size())
 
 				for i, rowData := range insertRowBatch.Values() {
-					paginationKey, err := rowData.GetUint64(insertRowBatch.PaginationKeyIndex())
+					paginationKey, err := insertRowBatch.VerifierPaginationKey(i)
 					if err != nil {
 						logger.WithError(err).Error("failed to get paginationKey data")
 						return err
@@ -292,10 +294,9 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 				}
 
 				batch = &DataRowBatch{
-					values:             rows,
-					paginationKeyIndex: insertRowBatch.PaginationKeyIndex(),
-					table:              table,
-					fingerprints:       fingerprints,
+					values:       rows,
+					table:        table,
+					fingerprints: fingerprints,
 				}
 			}
 		}

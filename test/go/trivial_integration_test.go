@@ -4,6 +4,7 @@ import (
 	sqlorig "database/sql"
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
+	"math"
 	"math/rand"
 	"testing"
 
@@ -201,8 +202,8 @@ func setupSingleTableDatabaseWithHighBitUint64PaginationKeys(f *testhelpers.Test
 	stmt, err := sourceDB.Prepare("INSERT INTO gftest.table1 (id, data) VALUES (?, ?)")
 	testhelpers.PanicIfError(err)
 
-	for i := uint64(0); i < 100; i++ {
-		_, err = stmt.Exec(^uint64(0)-i, testhelpers.RandData())
+	for i := 1; i < 101; i++ {
+		_, err = stmt.Exec(int(math.Pow(2, 63)) - i, testhelpers.RandData())
 		testhelpers.PanicIfError(err)
 	}
 }

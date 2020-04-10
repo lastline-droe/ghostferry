@@ -76,7 +76,7 @@ Features/fixes added in this fork include
 - support [schema modifications during the cutover phase](https://github.com/Lastline-Inc/ghostferry/issues/11):
   unlike the original version of `Ghostferry`, which ignores any DDL events (such
   as `CREATE`/`ALTER`/`DELETE TABLE` or `TRUNCATE TABLE` statements), this fork
-  propagates such events from the source to the target database.
+  propagates such events from the source to the target database.  
   Note that there are a few restrictions/limitations with this:
     - schema changes occurring during the *copy phase* cannot be handled if the
       columns of an copy-in-progress table change. There are work-arounds in
@@ -98,6 +98,21 @@ Features/fixes added in this fork include
   A set of optional flags allow disabling locking and checking for replication
   delay when reading from the source, if the user knows that the operation is
   safe.
+- support [non-int primary keys](https://github.com/Lastline-Inc/ghostferry/issues/24):
+  Extend `Ghostferry` to support signed/unsigned integers, string, and
+  composite primary keys (that use ints and strings). This vastly reduces the
+  types of tables for which "full copy" is required.  
+  Additionally support iterating over table rows to copy in descending order.
+  This allows reading recent data first if the pagination key reflects
+  chronological data.  
+  Note that there are a few restrictions/limitations with this:
+    - support for row verification has not yet been implemented at this point.
+      Enabling inline/iterative verifiers causes an error at runtime if data
+      is requested to be verified for an incompatible table.
+    - because we support signed integer primary keys now, the maximum key value
+      supported is now 2**63 (previously 2**64). In practice it is unlikely to
+      have DB key values of this size, and it is thus not configurable to
+      provide the legacy behavior.
 
 Overview of How it Works
 ------------------------

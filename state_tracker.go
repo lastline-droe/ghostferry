@@ -2,8 +2,8 @@ package ghostferry
 
 import (
 	"container/ring"
+	"encoding/json"
 	"fmt"
-	"math"
 	sqlorig "database/sql"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"strings"
@@ -39,7 +39,7 @@ type SerializableState struct {
 	GhostferryVersion         string
 	LastKnownTableSchemaCache TableSchemaCache
 
-	LastSuccessfulPaginationKeys              map[string]uint64
+	LastSuccessfulPaginationKeys              map[string]*PaginationKeyData
 	CompletedTables                           map[string]bool
 	LastWrittenBinlogPosition                 BinlogPosition
 	LastStoredBinlogPositionForInlineVerifier BinlogPosition
@@ -90,7 +90,7 @@ type StateTracker struct {
 	lastWrittenBinlogPosition                 BinlogPosition
 	lastStoredBinlogPositionForInlineVerifier BinlogPosition
 
-	lastSuccessfulPaginationKeys map[string]uint64
+	lastSuccessfulPaginationKeys map[string]*PaginationKeyData
 	completedTables              map[string]bool
 
 	// optional database+table prefix to which we write the current status
@@ -105,7 +105,7 @@ func NewStateTracker(speedLogCount int) *StateTracker {
 		BinlogRWMutex: &sync.RWMutex{},
 		CopyRWMutex:   &sync.RWMutex{},
 
-		lastSuccessfulPaginationKeys: make(map[string]uint64),
+		lastSuccessfulPaginationKeys: make(map[string]*PaginationKeyData),
 		completedTables:              make(map[string]bool),
 		logger:                       logrus.WithField("tag", "state_tracker"),
 		iterationSpeedLog:            newSpeedLogRing(speedLogCount),
@@ -114,13 +114,27 @@ func NewStateTracker(speedLogCount int) *StateTracker {
 
 // serializedState is a state the tracker should start from, as opposed to
 // starting from the beginning.
-func NewStateTrackerFromSerializedState(speedLogCount int, serializedState *SerializableState) *StateTracker {
+func NewStateTrackerFromSerializedState(speedLogCount int, serializedState *SerializableState, tables TableSchemaCache) (*StateTracker, error) {
 	s := NewStateTracker(speedLogCount)
 	s.lastSuccessfulPaginationKeys = serializedState.LastSuccessfulPaginationKeys
 	s.completedTables = serializedState.CompletedTables
 	s.lastWrittenBinlogPosition = serializedState.LastWrittenBinlogPosition
 	s.lastStoredBinlogPositionForInlineVerifier = serializedState.LastStoredBinlogPositionForInlineVerifier
-	return s
+
+	for tableName, paginationKeyData := range s.lastSuccessfulPaginationKeys {
+		table := tables[tableName]
+		if table == nil {
+			return nil, fmt.Errorf("resume state contains pagination data for unknown table %s", tableName)
+		}
+
+		unmarshalledPaginationKeyData, err := UnmarshalPaginationKeyData(paginationKeyData, table)
+		if err != nil {
+			return nil, err
+		}
+		s.lastSuccessfulPaginationKeys[tableName] = unmarshalledPaginationKeyData
+	}
+
+	return s, nil
 }
 
 func NewStateTrackerFromTargetDB(f *Ferry) (s *StateTracker, state *SerializableState, err error) {
@@ -166,33 +180,36 @@ func (s *StateTracker) UpdateLastStoredBinlogPositionForInlineVerifier(pos Binlo
 	s.lastStoredBinlogPositionForInlineVerifier = pos
 }
 
-func (s *StateTracker) UpdateLastSuccessfulPaginationKey(table string, paginationKey uint64) {
+func (s *StateTracker) UpdateLastSuccessfulPaginationKey(table string, paginationKey *PaginationKeyData) {
 	s.CopyRWMutex.Lock()
 	defer s.CopyRWMutex.Unlock()
 
-	s.logger.WithField("table", table).Debugf("updating table last successful pagination key: %d", paginationKey)
+	s.logger.WithField("table", table).Debugf("updating table last successful pagination key: %s", paginationKey)
 
-	deltaPaginationKey := paginationKey - s.lastSuccessfulPaginationKeys[table]
+	var deltaPaginationKey uint64
+	if s.lastSuccessfulPaginationKeys[table] != nil {
+		if progress, ok := paginationKey.ProgressData(); ok {
+			if base, ok := s.lastSuccessfulPaginationKeys[table].ProgressData(); ok {
+				deltaPaginationKey = progress - base
+			}
+		}
+	}
 	s.lastSuccessfulPaginationKeys[table] = paginationKey
 
 	s.updateSpeedLog(deltaPaginationKey)
 }
 
-func (s *StateTracker) LastSuccessfulPaginationKey(table string) uint64 {
+func (s *StateTracker) LastSuccessfulPaginationKey(table string) (paginationKeyData *PaginationKeyData, completed bool) {
 	s.CopyRWMutex.RLock()
 	defer s.CopyRWMutex.RUnlock()
 
 	_, found := s.completedTables[table]
 	if found {
-		return math.MaxUint64
+		return nil, true
 	}
 
-	paginationKey, found := s.lastSuccessfulPaginationKeys[table]
-	if !found {
-		return 0
-	}
-
-	return paginationKey
+	paginationKey, _ := s.lastSuccessfulPaginationKeys[table]
+	return paginationKey, false
 }
 
 func (s *StateTracker) MarkTableAsCompleted(table string) {
@@ -261,7 +278,7 @@ func (s *StateTracker) Serialize(lastKnownTableSchemaCache TableSchemaCache, bin
 	state := &SerializableState{
 		GhostferryVersion:                         VersionString,
 		LastKnownTableSchemaCache:                 lastKnownTableSchemaCache,
-		LastSuccessfulPaginationKeys:              make(map[string]uint64),
+		LastSuccessfulPaginationKeys:              make(map[string]*PaginationKeyData),
 		CompletedTables:                           make(map[string]bool),
 		LastWrittenBinlogPosition:                 s.lastWrittenBinlogPosition,
 		LastStoredBinlogPositionForInlineVerifier: s.lastStoredBinlogPositionForInlineVerifier,
@@ -323,7 +340,7 @@ func (s *StateTracker) SerializeToDB(db *sql.DB) error {
 	}
 
 	for tableName, lastPaginationKey := range s.lastSuccessfulPaginationKeys {
-		s.logger.Debugf("storing copy state for %s: %d", tableName, lastPaginationKey)
+		s.logger.Debugf("storing copy state for %s: %s", tableName, lastPaginationKey)
 
 		paginationSql, paginationArgs, err := s.GetStoreRowCopyPositionSql(tableName, lastPaginationKey)
 		if err != nil {
@@ -384,7 +401,7 @@ func (s *StateTracker) initializeDBStateSchema(db *sql.DB, stateDatabase string)
 	rowCopyCreateTable := `
 CREATE TABLE ` + rowCopyTableName + ` (
     table_name varchar(255) CHARACTER SET ascii NOT NULL,
-    last_pagination_key bigint(19) unsigned NOT NULL,
+    last_pagination_key TEXT NOT NULL,
     copy_complete BOOLEAN NOT NULL DEFAULT FALSE,
     last_write_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (table_name)
@@ -484,7 +501,7 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 	state := &SerializableState{
 		GhostferryVersion:            VersionString,
 		LastKnownTableSchemaCache:    tables,
-		LastSuccessfulPaginationKeys: make(map[string]uint64),
+		LastSuccessfulPaginationKeys: make(map[string]*PaginationKeyData),
 		CompletedTables:              make(map[string]bool),
 	}
 
@@ -506,7 +523,7 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 
 	for rowCopyRows.Next() {
 		var tableName string
-		var lastPaginationKey uint64
+		var lastPaginationKey string
 		var copyComplete bool
 		err = rowCopyRows.Scan(&tableName, &lastPaginationKey, &copyComplete)
 		if err != nil {
@@ -517,8 +534,32 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 			return nil, err
 		}
 
-		state.LastSuccessfulPaginationKeys[tableName] = lastPaginationKey
-		s.UpdateLastSuccessfulPaginationKey(tableName, lastPaginationKey)
+		// non-paginated tables don't have resume key data
+		if lastPaginationKey != "" {
+			var lastPaginationKeyData PaginationKeyData
+			err = json.NewDecoder(strings.NewReader(lastPaginationKey)).Decode(&lastPaginationKeyData)
+			if err != nil {
+				s.logger.WithFields(logrus.Fields{
+					"err":   err,
+					"table": tableName,
+					"data":  lastPaginationKey,
+				}).Errorf("parsing row-copy resume key from target DB failed")
+				return nil, err
+			}
+
+			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, tables[tableName])
+			if err != nil {
+				s.logger.WithFields(logrus.Fields{
+					"err":   err,
+					"table": tableName,
+					"data":  lastPaginationKey,
+				}).Errorf("unmarshalling row-copy resume key from target DB failed")
+				return nil, err
+			}
+
+			state.LastSuccessfulPaginationKeys[tableName] = keyData
+			s.UpdateLastSuccessfulPaginationKey(tableName, keyData)
+		}
 		if copyComplete {
 			s.MarkTableAsCompleted(tableName)
 			state.CompletedTables[tableName] = true
@@ -639,23 +680,32 @@ func (s *StateTracker) GetStoreRowCopyDoneSql(tableName string) (sqlStr string, 
 	sqlStr, args, err = squirrel.
 		Insert(s.getRowCopyStateTable()).
 		Columns("table_name", "last_pagination_key", "copy_complete").
-		Values(tableName, 0, 1).
+		Values(tableName, "", 1).
 		Suffix("ON DUPLICATE KEY UPDATE copy_complete=1").
 		ToSql()
 
 	return
 }
 
-func (s *StateTracker) GetStoreRowCopyPositionSql(tableName string, endPaginationKey uint64) (sqlStr string, args []interface{}, err error) {
+func (s *StateTracker) GetStoreRowCopyPositionSql(tableName string, endPaginationKey *PaginationKeyData) (sqlStr string, args []interface{}, err error) {
 	if s.stateTablesPrefix == "" {
 		return
 	}
 
+	paginationKeyData := ""
+	if endPaginationKey != nil {
+		stateBytes, err := json.Marshal(endPaginationKey)
+		if err != nil {
+			return "", nil, err
+		}
+
+		paginationKeyData = string(stateBytes)
+	}
 	sqlStr, args, err = squirrel.
 		Insert(s.getRowCopyStateTable()).
 		Columns("table_name", "last_pagination_key").
-		Values(tableName, endPaginationKey).
-		Suffix("ON DUPLICATE KEY UPDATE last_pagination_key=?", endPaginationKey).
+		Values(tableName, paginationKeyData).
+		Suffix("ON DUPLICATE KEY UPDATE last_pagination_key=?", paginationKeyData).
 		ToSql()
 
 	return

@@ -25,8 +25,27 @@ type ShardedCopyFilter struct {
 	missingShardingKeyIndexLogged sync.Map
 }
 
-func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.TableSchema, lastPaginationKey, batchSize uint64) (sq.SelectBuilder, error) {
-	quotedPaginationKey := "`" + table.GetPaginationColumn().Name + "`"
+func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.TableSchema, lastPaginationKey *ghostferry.PaginationKeyData, batchSize uint64) (sq.SelectBuilder, error) {
+	if !table.PaginationKey.IsLinearUnsignedKey() {
+		return sq.SelectBuilder{}, ghostferry.UnsupportedPaginationKeyError(table.Schema, table.Name, table.PaginationKey.String())
+	}
+
+	var lastPaginationKeyValue uint64
+	if lastPaginationKey != nil {
+		value, err := lastPaginationKey.Values.GetInt64(0)
+		if err != nil {
+			return sq.SelectBuilder{}, err
+		}
+
+		// for legacy-compatibility, we allow signed pagination keys, so we have to
+		// make sure no signed data snuck in
+		if value < 0 {
+			return sq.SelectBuilder{}, fmt.Errorf("table %s contains an unsupported (signed) pagination key value %d", table, value)
+		}
+		lastPaginationKeyValue = uint64(value)
+	}
+
+	quotedPaginationKey := "`" + table.PaginationKey.Columns[0].Name + "`"
 	quotedShardingKey := "`" + f.ShardingKey + "`"
 	quotedTable := ghostferry.QuotedTableName(table)
 
@@ -41,14 +60,14 @@ func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.Tabl
 		return sq.Select(columns...).
 			From(quotedTable + " USE INDEX (PRIMARY)").
 			Where(sq.Eq{quotedPaginationKey: f.ShardingValue}).
-			Where(sq.Gt{quotedPaginationKey: lastPaginationKey}), nil
+			Where(sq.Gt{quotedPaginationKey: lastPaginationKeyValue}), nil
 	}
 
 	joinTables, exists := f.JoinedTables[table.Name]
 	if !exists {
 		// This is a normal sharded table; functionally:
 		//   SELECT * FROM x
-		//     WHERE ShardingKey = ShardingValue AND PaginationKey > LastPaginationKey
+		//     WHERE ShardingKey = ShardingValue AND PaginationKey > lastPaginationKeyValue
 		//     ORDER BY PaginationKey LIMIT BatchSize
 		//
 		// However, we found that for some tables, MySQL would not use the
@@ -67,7 +86,7 @@ func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.Tabl
 
 		return sq.Select(columns...).
 			From(quotedTable).
-			Join("("+selectPaginationKeys+") AS `batch` USING("+quotedPaginationKey+")", f.ShardingValue, lastPaginationKey), nil
+			Join("("+selectPaginationKeys+") AS `batch` USING("+quotedPaginationKey+")", f.ShardingValue, lastPaginationKeyValue), nil
 	}
 
 	// This is a "joined table". It is the only supported type of table that
@@ -103,7 +122,7 @@ func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.Tabl
 		pattern := "SELECT `%s` AS sharding_join_alias FROM `%s`.`%s` WHERE `%s` = ? AND `%s` > ?"
 		sql := fmt.Sprintf(pattern, joinTable.JoinColumn, table.Schema, joinTable.TableName, f.ShardingKey, joinTable.JoinColumn)
 		clauses = append(clauses, sql)
-		args = append(args, f.ShardingValue, lastPaginationKey)
+		args = append(args, f.ShardingValue, lastPaginationKeyValue)
 	}
 
 	subquery := strings.Join(clauses, " UNION DISTINCT ")
@@ -132,7 +151,7 @@ func (f *ShardedCopyFilter) shardingKeyIndexHint(table *ghostferry.TableSchema) 
 
 func (f *ShardedCopyFilter) shardingKeyIndexName(table *ghostferry.TableSchema) string {
 	indexName := ""
-	paginationKeyName := table.GetPaginationColumn().Name
+	paginationKeyName := table.PaginationKey.Columns[0].Name
 
 	for _, x := range table.Indexes {
 		if x.Columns[0] == f.ShardingKey {
@@ -150,9 +169,14 @@ func (f *ShardedCopyFilter) shardingKeyIndexName(table *ghostferry.TableSchema) 
 }
 
 func (f *ShardedCopyFilter) ApplicableDMLEvent(event ghostferry.DMLEvent) (bool, error) {
+	table := event.TableSchema()
+	if !table.PaginationKey.IsLinearUnsignedKey() {
+		return false, ghostferry.UnsupportedPaginationKeyError(table.Schema, table.Name, table.PaginationKey.String())
+	}
+
 	shardingKey := f.ShardingKey
 	if _, exists := f.PrimaryKeyTables[event.Table()]; exists {
-		shardingKey = event.TableSchema().GetPaginationColumn().Name
+		shardingKey = table.PaginationKey.Columns[0].Name
 	}
 
 	columns := event.TableSchema().Columns
