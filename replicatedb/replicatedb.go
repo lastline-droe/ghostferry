@@ -13,7 +13,6 @@ type ReplicatedbFerry struct {
 func NewFerry(config *Config) *ReplicatedbFerry {
 	ferry := &ghostferry.Ferry{
 		Config: config.Config,
-		AllowReplicationFromReplia: true,
 	}
 
 	return &ReplicatedbFerry{

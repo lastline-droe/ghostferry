@@ -28,6 +28,7 @@ func (d *SqlDBWithFakeRollback) Rollback() error {
 // to perform a noop.
 type SqlPreparerAndRollbacker interface {
 	SqlPreparer
+	Query(query string, args ...interface{}) (*sqlorig.Rows, error)
 	Rollback() error
 }
 
@@ -263,12 +264,13 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 }
 
 // returns a new PaginatedCursor with an embedded copy of itself
-func (c *CursorConfig) NewFullTableCursor(table *TableSchema) *FullTableCursor {
+func (c *CursorConfig) NewFullTableCursor(table *TableSchema, lockTable bool) *FullTableCursor {
 	return &FullTableCursor{
 		DB:          c.DB,
 		Table:       table,
 		BatchSize:   c.BatchSize,
 		ReadRetries: c.ReadRetries,
+		lockTable:   lockTable,
 	}
 }
 
@@ -278,7 +280,8 @@ type FullTableCursor struct {
 	BatchSize   uint64
 	ReadRetries int
 
-	logger *logrus.Entry
+	lockTable bool
+	logger    *logrus.Entry
 }
 
 func (c *FullTableCursor) Each(f func(RowBatch) error) error {
@@ -298,25 +301,31 @@ func (c *FullTableCursor) Each(f func(RowBatch) error) error {
 	}
 
 	err = WithRetries(c.ReadRetries, 0, c.logger, "fetch rows", func() (err error) {
-		tx, err := c.DB.Begin()
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_, err := tx.Query("UNLOCK TABLES")
+		var tx SqlPreparerAndRollbacker
+		if c.lockTable {
+			tx, err = c.DB.Begin()
 			if err != nil {
-				c.logger.WithError(err).Error("unlocking table failed")
+				return err
 			}
-			tx.Rollback()
-		}()
 
-		// NOTE: We need to hold the row-lock on all rows for the entire
-		// operation. Yes, crazy, but if we can't paginate, what are we supposed
-		// to do? We really, *really*, *really* only use this for small tables
-		_, err = tx.Query(fmt.Sprintf("LOCK TABLES %s WRITE", QuotedTableName(c.Table)))
-		if err != nil {
-			c.logger.WithError(err).Error("locking table failed")
-			return err
+			defer func() {
+				_, err := tx.Query("UNLOCK TABLES")
+				if err != nil {
+					c.logger.WithError(err).Error("unlocking table failed")
+				}
+				tx.Rollback()
+			}()
+
+			// NOTE: We need to hold the row-lock on all rows for the entire
+			// operation. Yes, crazy, but if we can't paginate, what are we supposed
+			// to do? We really, *really*, *really* only use this for small tables
+			_, err = tx.Query(fmt.Sprintf("LOCK TABLES %s WRITE", QuotedTableName(c.Table)))
+			if err != nil {
+				c.logger.WithError(err).Error("locking table failed")
+				return err
+			}
+		} else {
+			tx = &SqlDBWithFakeRollback{c.DB}
 		}
 
 		rowOffset := 0

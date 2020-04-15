@@ -14,15 +14,17 @@ type DataIterator struct {
 	Concurrency       int
 	SelectFingerprint bool
 
-	ErrorHandler         ErrorHandler
-	CursorConfig         *CursorConfig
-	StateTracker         *StateTracker
+	ErrorHandler ErrorHandler
+	CursorConfig *CursorConfig
+	StateTracker *StateTracker
 
-	targetPaginationKeys *sync.Map
-	failOnFirstCopyError bool
-	batchListeners       []func(RowBatch) error
-	doneListeners        []func() error
-	logger               *logrus.Entry
+	targetPaginationKeys        *sync.Map
+	failOnFirstCopyError        bool
+	lockTableForPaginatedCopy   bool
+	lockTableForUnpaginatedCopy bool
+	batchListeners              []func(RowBatch) error
+	doneListeners               []func() error
+	logger                      *logrus.Entry
 }
 
 func NewDataIterator(f *Ferry) *DataIterator {
@@ -41,7 +43,9 @@ func NewDataIterator(f *Ferry) *DataIterator {
 		},
 		StateTracker: f.StateTracker,
 
-		failOnFirstCopyError: f.Config.FailOnFirstTableCopyError,
+		failOnFirstCopyError:        f.Config.FailOnFirstTableCopyError,
+		lockTableForPaginatedCopy:   !f.Config.CopyPaginatedTablesWithoutLock,
+		lockTableForUnpaginatedCopy: !f.Config.CopyUnpaginatedTablesWithoutLock,
 	}
 	d.ensureInitialized()
 	return d
@@ -251,7 +255,12 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 		return err
 	}
 
-	cursor := d.CursorConfig.NewPaginatedCursor(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+	var cursor *PaginatedCursor
+	if d.lockTableForPaginatedCopy {
+		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+	} else {
+		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKey, targetPaginationKeyInterface.(uint64))
+	}
 	if d.SelectFingerprint {
 		if len(cursor.ColumnsToSelect) == 0 {
 			cursor.ColumnsToSelect = []string{"*"}
@@ -313,7 +322,7 @@ func (d *DataIterator) processUnpaginatedTable(table *TableSchema) error {
 	logger := d.logger.WithField("table", table.String())
 	logger.Debug("Starting full-table copy")
 
-	cursor := d.CursorConfig.NewFullTableCursor(table)
+	cursor := d.CursorConfig.NewFullTableCursor(table, d.lockTableForUnpaginatedCopy)
 	err := cursor.Each(func(batch RowBatch) error {
 		metrics.Count("RowEvent", int64(batch.Size()), []MetricTag{
 			MetricTag{"table", table.Name},

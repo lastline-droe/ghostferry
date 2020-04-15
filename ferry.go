@@ -70,10 +70,6 @@ type Ferry struct {
 	ErrorHandler                       ErrorHandler
 	Throttler                          Throttler
 	WaitUntilReplicaIsCaughtUpToMaster *WaitUntilReplicaIsCaughtUpToMaster
-	// For migrating data, it is crucial that we're either reading from a master or from a slave
-	// that is up-to-date with its master. If we are just continuously repliating/streaming data,
-	// it's OK to work on an outdated upstream
-	AllowReplicationFromReplia         bool
 
 	// This can be specified by the caller. If specified, do not specify
 	// VerifierType in Config (or as an empty string) or an error will be
@@ -380,7 +376,7 @@ func (f *Ferry) Initialize() (err error) {
 			f.logger.WithError(err).Error("source master is a read replica")
 			return err
 		}
-	} else if !f.AllowReplicationFromReplia {
+	} else if !f.AllowReplicationFromReplica {
 		isReplica, err := CheckDbIsAReplica(f.SourceDB)
 		if err != nil {
 			f.logger.WithError(err).Error("cannot check if source is a replica")

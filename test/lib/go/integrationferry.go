@@ -205,6 +205,7 @@ func NewStandardConfig() (*ghostferry.Config, error) {
 		},
 
 		AutomaticCutover: true,
+		FailOnFirstTableCopyError: true,
 		TableFilter: &testhelpers.TestTableFilter{
 			DbsFunc:    testhelpers.DbApplicabilityFilter([]string{"gftest"}),
 			TablesFunc: nil,
