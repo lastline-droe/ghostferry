@@ -146,7 +146,7 @@ module DbHelper
       result = conn.query("SELECT * FROM #{table} ORDER BY RAND() LIMIT 1")
       metrics[:sample_row] = result.first
     else
-      result = conn.query("SELECT * FROM #{table} WHERE id = #{sample_id} LIMIT 1")
+      result = conn.prepare("SELECT * FROM #{table} WHERE id = ? LIMIT 1").execute(sample_id)
       metrics[:sample_row] = result.first
     end
 
