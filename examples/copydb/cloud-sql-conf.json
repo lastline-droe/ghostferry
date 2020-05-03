@@ -1,7 +1,7 @@
 {
   "Source": {
     "Host": "127.0.0.1",
-    "Port": 29292,
+    "Port": 29291,
     "User": "root",
     "Pass": "",
     "Collation": "utf8mb4_unicode_ci",
@@ -12,7 +12,7 @@
 
   "Target": {
     "Host": "127.0.0.1",
-    "Port": 29293,
+    "Port": 29292,
     "User": "root",
     "Pass": "",
     "Collation": "utf8mb4_unicode_ci",
@@ -20,21 +20,6 @@
       "charset": "utf8mb4"
     }
   },
-
-  "RunFerryFromReplica": true,
-
-  "SourceReplicationMaster": {
-    "Host": "127.0.0.1",
-    "Port": 29291,
-    "User": "root",
-    "Pass": "",
-    "Collation": "utf8mb4_unicode_ci",
-    "Params": {
-      "charset": "utf8mb4"
-    }
-  },
-
-  "ReplicatedMasterPositionQuery": "SELECT file, position FROM meta.heartbeat",
 
   "Databases": {
     "Whitelist": ["abc"]
@@ -44,5 +29,11 @@
     "Blacklist": ["schema_migrations"]
   },
 
-  "VerifierType": "ChecksumTable"
+  "DBReadRetries": 3,
+  "DumpStateOnSignal": false,
+  "ResumeStateFromDB": "_ghostferry",
+  "ForceResumeStateUpdatesToDB": true,
+
+  "AllowReplicationFromReplica": true,
+  "LockStrategy": "LockInGhostferry"
 }

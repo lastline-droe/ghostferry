@@ -3,6 +3,7 @@ package ghostferry
 import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
+	"sync"
 
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
@@ -20,6 +21,7 @@ type BinlogWriter struct {
 	BatchSize          int
 	WriteRetries       int
 	ApplySchemaChanges bool
+	LockStrategy       string
 
 	ErrorHandler                ErrorHandler
 	StateTracker                *StateTracker
@@ -366,6 +368,7 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 	WaitForThrottle(b.Throttler)
 
 	queryBuffer := []byte("BEGIN;\n")
+	locksToObtain := make(map[string]*sync.RWMutex)
 
 	for _, ev := range events {
 		eventDatabaseName := ev.DXLEvent.Database()
@@ -385,6 +388,18 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 
 		queryBuffer = append(queryBuffer, sql...)
 		queryBuffer = append(queryBuffer, ";\n"...)
+
+		// for DML events, we need to make sure we synchronize with the
+		// data-iterator - for details on why, see the corresponding
+		// data-iterator code
+		if b.LockStrategy == LockTypeInGhostferry {
+			if dmlEvent, ok := ev.DXLEvent.(DMLEvent); ok {
+				fullTableName := dmlEvent.TableSchema().Table.String()
+				if _, found := locksToObtain[fullTableName]; !found {
+					locksToObtain[fullTableName] = b.StateTracker.GetTableLock(fullTableName)
+				}
+			}
+		}
 	}
 
 	startEv := events[0].ReplicationEvent
@@ -408,6 +423,13 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 	query := string(queryBuffer)
 	if IncrediblyVerboseLogging {
 		b.logger.Debugf("Applying binlog statements: %s (%v)", query, args)
+	}
+
+	for _, lock := range locksToObtain {
+		if lock != nil {
+			lock.Lock()
+			defer lock.Unlock()
+		}
 	}
 
 	_, err := b.DB.Exec(query, args...)

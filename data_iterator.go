@@ -17,13 +17,12 @@ type DataIterator struct {
 	CursorConfig *CursorConfig
 	StateTracker *StateTracker
 
-	targetPaginationKeys        *sync.Map
-	failOnFirstCopyError        bool
-	lockTableForPaginatedCopy   bool
-	lockTableForUnpaginatedCopy bool
-	batchListeners              []func(RowBatch) error
-	doneListeners               []func() error
-	logger                      *logrus.Entry
+	targetPaginationKeys *sync.Map
+	failOnFirstCopyError bool
+	lockStrategy         string
+	batchListeners       []func(RowBatch) error
+	doneListeners        []func() error
+	logger               *logrus.Entry
 }
 
 func NewDataIterator(f *Ferry) *DataIterator {
@@ -44,9 +43,8 @@ func NewDataIterator(f *Ferry) *DataIterator {
 		},
 		StateTracker: f.StateTracker,
 
-		failOnFirstCopyError:        f.Config.FailOnFirstTableCopyError,
-		lockTableForPaginatedCopy:   !f.Config.CopyPaginatedTablesWithoutLock,
-		lockTableForUnpaginatedCopy: !f.Config.CopyUnpaginatedTablesWithoutLock,
+		failOnFirstCopyError: f.Config.FailOnFirstTableCopyError,
+		lockStrategy:         f.Config.LockStrategy,
 	}
 	d.ensureInitialized()
 	return d
@@ -258,10 +256,14 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 	}
 
 	var cursor *PaginatedCursor
-	if d.lockTableForPaginatedCopy {
+	if d.lockStrategy == LockTypeSourceDB {
 		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKeyData, targetPaginationKeyData)
 	} else {
-		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKeyData, targetPaginationKeyData)
+		var tableLock *sync.RWMutex
+		if d.lockStrategy == LockTypeInGhostferry {
+			tableLock = d.StateTracker.GetTableLock(table.String())
+		}
+		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKeyData, targetPaginationKeyData, tableLock)
 	}
 	if d.SelectFingerprint {
 		if len(cursor.ColumnsToSelect) == 0 {
@@ -323,7 +325,12 @@ func (d *DataIterator) processUnpaginatedTable(table *TableSchema) error {
 	logger := d.logger.WithField("table", table.String())
 	logger.Debug("Starting full-table copy")
 
-	cursor := d.CursorConfig.NewFullTableCursor(table, d.lockTableForUnpaginatedCopy)
+	var tableLock *sync.RWMutex
+	if d.lockStrategy == LockTypeInGhostferry {
+		tableLock = d.StateTracker.GetTableLock(table.String())
+	}
+	cursor := d.CursorConfig.NewFullTableCursor(table, d.lockStrategy == LockTypeSourceDB, tableLock)
+
 	err := cursor.Each(func(batch RowBatch) error {
 		metrics.Count("RowEvent", int64(batch.Size()), []MetricTag{
 			MetricTag{"table", table.Name},

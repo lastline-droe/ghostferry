@@ -92,6 +92,7 @@ type StateTracker struct {
 
 	lastSuccessfulPaginationKeys map[string]*PaginationKeyData
 	completedTables              map[string]bool
+	tableLocks                   map[string]*sync.RWMutex
 
 	// optional database+table prefix to which we write the current status
 	stateTablesPrefix string
@@ -107,6 +108,7 @@ func NewStateTracker(speedLogCount int) *StateTracker {
 
 		lastSuccessfulPaginationKeys: make(map[string]*PaginationKeyData),
 		completedTables:              make(map[string]bool),
+		tableLocks:                   make(map[string]*sync.RWMutex),
 		logger:                       logrus.WithField("tag", "state_tracker"),
 		iterationSpeedLog:            newSpeedLogRing(speedLogCount),
 	}
@@ -225,6 +227,23 @@ func (s *StateTracker) IsTableComplete(table string) bool {
 	defer s.CopyRWMutex.RUnlock()
 
 	return s.completedTables[table]
+}
+
+func (s *StateTracker) GetTableLock(table string) *sync.RWMutex {
+	s.CopyRWMutex.Lock()
+	defer s.CopyRWMutex.Unlock()
+
+	if s.completedTables[table] {
+		return nil
+	}
+
+	if lock, found := s.tableLocks[table]; found {
+		return lock
+	}
+
+	lock := &sync.RWMutex{}
+	s.tableLocks[table] = lock
+	return lock
 }
 
 // This is reasonably accurate if the rows copied are distributed uniformly
