@@ -258,6 +258,9 @@ module GhostferryHelper
 
         if @config[:iterate_in_descending_order]
           environment["GHOSTFERRY_ITERATE_IN_DESCENDING_ORDER"] = "true"
+
+        if @config[:lock_strategy]
+          environment["GHOSTFERRY_LOCK_STRATEGY"] = @config[:lock_strategy]
         end
 
         @logger.info("starting ghostferry test binary #{@compiled_binary_path}")
