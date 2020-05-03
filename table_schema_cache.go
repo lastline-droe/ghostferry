@@ -31,14 +31,62 @@ func NewTableIdentifierFromSchemaTable(table *TableSchema) TableIdentifier {
 	}
 }
 
+type PaginationKey struct {
+	// The sorted list of columns
+	Columns []*schema.TableColumn
+
+	// The sorted indices of the columns as they appear in the table
+	ColumnIndices []int
+
+	// Optional index of the column that we consider most indicative of
+	// progress. Such an entry may not exist and can be set to -1 to explicitly
+	// indicating that it does not exist.
+	// Used only for estimating the position of a particular value within the
+	// range of the pagination
+	MostSignificantColumnIndex int
+
+	// If true, the table should be traversed in descending order. This means
+	// that we allow copying more recent data first (if the key refers to
+	// chronological order of entries)
+	PaginateInAscendingOrder bool
+}
+
+func (k PaginationKey) String() string {
+	s := "PaginationKey("
+	for i, column := range k.Columns {
+		if i > 0 {
+			s += ", "
+		}
+		s += fmt.Sprintf("%s[%d]", column.Name, k.ColumnIndices[i])
+	}
+	return s + ")"
+}
+
+func (k PaginationKey) IsLinearUnsignedKey() bool {
+	// The upstream ghostferry code assumes all pagination keys are unsigned
+	// single-column primary keys. This requirement has been lifted from most
+	// of the code, including copy and streaming, but not from the verifiers
+	// yet.
+	// This property validates if those functionalities are compatible with
+	// this pagination key
+	if len(k.Columns) == 1 {
+		column := k.Columns[0]
+		// NOTE: Technically, we should also enforce column.IsUnsigned here,
+		// but it seems that requirement was always in ghostferry but never
+		// explicitly enforces - enforcing it now would break backwards
+		// compatibility, so we don't.
+		return column.Type == schema.TYPE_NUMBER
+	}
+	return false
+}
+
 // This is a wrapper on schema.Table with some custom information we need.
 type TableSchema struct {
 	*schema.Table
 
 	CompressedColumnsForVerification map[string]string   // Map of column name => compression type
 	IgnoredColumnsForVerification    map[string]struct{} // Set of column name
-	PaginationKeyColumn              *schema.TableColumn
-	PaginationKeyIndex               int
+	PaginationKey                    *PaginationKey
 
 	rowMd5Query string
 }
@@ -55,9 +103,13 @@ type TableSchema struct {
 // Note that the MD5 hash should consists of at least 1 column: the paginationKey column.
 // This is to say that there should never be a case where the MD5 hash is
 // derived from an empty string.
-func (t *TableSchema) FingerprintQuery(schemaName, tableName string, numRows int) string {
+func (t *TableSchema) FingerprintQuery(schemaName, tableName string, numRows int) (string, error) {
+	if !t.PaginationKey.IsLinearUnsignedKey() {
+		return "", UnsupportedPaginationKeyError(t.Schema, t.Name, t.PaginationKey.String())
+	}
+
 	columnsToSelect := make([]string, 2+len(t.CompressedColumnsForVerification))
-	columnsToSelect[0] = quoteField(t.GetPaginationColumn().Name)
+	columnsToSelect[0] = quoteField(t.PaginationKey.Columns[0].Name)
 	columnsToSelect[1] = t.RowMd5Query()
 	i := 2
 	for columnName, _ := range t.CompressedColumnsForVerification {
@@ -71,7 +123,7 @@ func (t *TableSchema) FingerprintQuery(schemaName, tableName string, numRows int
 		QuotedTableNameFromString(schemaName, tableName),
 		columnsToSelect[0],
 		strings.Repeat("?,", numRows-1)+"?",
-	)
+	), nil
 }
 
 func (t *TableSchema) RowMd5Query() string {
@@ -120,8 +172,8 @@ func QuotedTableNameFromString(database, table string) string {
 	return fmt.Sprintf("`%s`.`%s`", database, table)
 }
 
-func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) (paginatedTables map[*TableSchema]uint64, unpaginatedTables []*TableSchema, err error) {
-	paginatedTables = make(map[*TableSchema]uint64)
+func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) (paginatedTables map[*TableSchema]*PaginationKeyData, unpaginatedTables []*TableSchema, err error) {
+	paginatedTables = make(map[*TableSchema]*PaginationKeyData)
 	unpaginatedTables = make([]*TableSchema, 0, len(tables))
 
 	for _, table := range tables {
@@ -135,7 +187,7 @@ func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) 
 		// NOTE: We treat empty tables just like any other non-paginated table
 		// to make sure they are marked as completed in the state-tracker (if
 		// they are not already)
-		if isEmpty || table.GetPaginationColumn() == nil {
+		if isEmpty || table.PaginationKey == nil {
 			logger.Debugf("tracking as unpaginated table (empty: %v)", isEmpty)
 			unpaginatedTables = append(unpaginatedTables, table)
 			continue
@@ -143,7 +195,7 @@ func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) 
 
 		maxPaginationKey, maxPaginationKeyExists, paginationErr := maxPaginationKey(db, table)
 		if paginationErr != nil {
-			logger.WithError(paginationErr).Errorf("failed to get max primary key %s", table.GetPaginationColumn().Name)
+			logger.WithError(paginationErr).Errorf("failed to get max primary key %s", table.PaginationKey)
 			err = paginationErr
 			return
 		}
@@ -155,7 +207,7 @@ func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) 
 			continue
 		}
 
-		logger.Debugf("tracking as paginated table with max-pagination %d", maxPaginationKey)
+		logger.Debugf("tracking as paginated table with max-pagination %s", maxPaginationKey)
 		paginatedTables[table] = maxPaginationKey
 	}
 
@@ -221,13 +273,13 @@ func LoadTables(db *sql.DB, tableFilter TableFilter, columnCompressionConfig Col
 				tableLog.Debug("table is marked for full-table copy")
 			} else {
 				tableLog.Debug("loading table schema pagination keys")
-				paginationKeyColumn, paginationKeyIndex, err := tableSchema.paginationKeyColumn(cascadingPaginationColumnConfig)
+				paginationKey, err := tableSchema.paginationKey(cascadingPaginationColumnConfig)
 				if err != nil {
 					tableLog.WithError(err).Error("invalid table")
 					return tableSchemaCache, err
 				}
-				tableSchema.PaginationKeyColumn = paginationKeyColumn
-				tableSchema.PaginationKeyIndex = paginationKeyIndex
+				tableLog.Debugf("using pagination key %s", paginationKey)
+				tableSchema.PaginationKey = paginationKey
 			}
 
 			tableSchemaCache[tableSchema.String()] = tableSchema
@@ -258,45 +310,81 @@ func NonExistingPaginationKeyError(schema, table string) error {
 	return fmt.Errorf("%s has no Primary Key to default to for Pagination purposes. Kindly specify a Pagination Key for this table in the CascadingPaginationColumnConfig", QuotedTableNameFromString(schema, table))
 }
 
-// NonNumericPaginationKeyError exported to facilitate black box testing
-func NonNumericPaginationKeyError(schema, table, paginationKey string) error {
-	return fmt.Errorf("Pagination Key `%s` for %s is non-numeric", paginationKey, QuotedTableNameFromString(schema, table))
+// UnsupportedPaginationKeyError exported to facilitate black box testing
+func UnsupportedPaginationKeyError(schema, table, paginationKey string) error {
+	return fmt.Errorf("Pagination Key `%s` for %s is non-numeric/-text", paginationKey, QuotedTableNameFromString(schema, table))
 }
 
-func (t *TableSchema) paginationKeyColumn(cascadingPaginationColumnConfig *CascadingPaginationColumnConfig) (*schema.TableColumn, int, error) {
+func (t *TableSchema) paginationKey(cascadingPaginationColumnConfig *CascadingPaginationColumnConfig) (*PaginationKey, error) {
 	var err error
-	var paginationKeyColumn *schema.TableColumn
-	var paginationKeyIndex int
+
+	paginationKeyColumns := make([]*schema.TableColumn, 0)
+	paginationKeyColumnIndices := make([]int, 0)
 
 	if paginationColumn, found := cascadingPaginationColumnConfig.PaginationColumnFor(t.Schema, t.Name); found {
 		// Use per-schema, per-table pagination key from config
+		var paginationKeyColumn *schema.TableColumn
+		var paginationKeyIndex int
 		paginationKeyColumn, paginationKeyIndex, err = t.findColumnByName(paginationColumn)
-	} else if len(t.PKColumns) == 1 {
+		if err == nil {
+			paginationKeyColumns = append(paginationKeyColumns, paginationKeyColumn)
+			paginationKeyColumnIndices = append(paginationKeyColumnIndices, paginationKeyIndex)
+		}
+	} else if len(t.PKColumns) > 0 {
 		// Use Primary Key
-		paginationKeyIndex = t.PKColumns[0]
-		paginationKeyColumn = &t.Columns[paginationKeyIndex]
+		//
+		// NOTE: A primary key has to be unique, but it may contain columns that
+		// are not needed for uniqueness. The ideal pagination key has length of
+		// 1, so we explicitly check if a subset of keys is sufficient.
+		// We could also do this checking for a uniqueness contstraint in the
+		// future
+		for i, column := range t.Columns {
+			if column.IsAuto {
+				paginationKeyColumns = append(paginationKeyColumns, &column)
+				paginationKeyColumnIndices = append(paginationKeyColumnIndices, i)
+				break
+			}
+		}
+		// if we failed finding an auto-increment, build a composite key
+		if len(paginationKeyColumns) == 0 {
+			for _, paginationKeyIndex := range t.PKColumns {
+				paginationKeyColumns = append(paginationKeyColumns, &t.Columns[paginationKeyIndex])
+				paginationKeyColumnIndices = append(paginationKeyColumnIndices, paginationKeyIndex)
+			}
+		}
 	} else if fallbackColumnName, found := cascadingPaginationColumnConfig.FallbackPaginationColumnName(); found {
 		// Try fallback from config
+		var paginationKeyColumn *schema.TableColumn
+		var paginationKeyIndex int
 		paginationKeyColumn, paginationKeyIndex, err = t.findColumnByName(fallbackColumnName)
+		if err == nil {
+			paginationKeyColumns = append(paginationKeyColumns, paginationKeyColumn)
+			paginationKeyColumnIndices = append(paginationKeyColumnIndices, paginationKeyIndex)
+		}
 	} else {
 		// No usable pagination key found
 		err = NonExistingPaginationKeyError(t.Schema, t.Name)
 	}
 
-	if paginationKeyColumn != nil && paginationKeyColumn.Type != schema.TYPE_NUMBER {
-		return nil, -1, NonNumericPaginationKeyError(t.Schema, t.Name, paginationKeyColumn.Name)
+	if err != nil || len(paginationKeyColumns) == 0 {
+		if err == nil {
+			panic(fmt.Errorf("no pagination key found, but no error set either"))
+		}
+		return nil, err
 	}
 
-	return paginationKeyColumn, paginationKeyIndex, err
-}
+	for _, column := range paginationKeyColumns {
+		if column.Type != schema.TYPE_NUMBER && column.Type != schema.TYPE_STRING {
+			return nil, UnsupportedPaginationKeyError(t.Schema, t.Name, column.Name)
+		}
+	}
 
-// GetPaginationColumn retrieves PaginationKeyColumn
-func (t *TableSchema) GetPaginationColumn() *schema.TableColumn {
-	return t.PaginationKeyColumn
-}
-
-func (t *TableSchema) GetPaginationKeyIndex() int {
-	return t.PaginationKeyIndex
+	paginationKey := &PaginationKey{
+		Columns: paginationKeyColumns,
+		ColumnIndices: paginationKeyColumnIndices,
+		PaginateInAscendingOrder: false,
+	}
+	return paginationKey, err
 }
 
 func (c TableSchemaCache) AsSlice() (tables []*TableSchema) {
@@ -454,31 +542,33 @@ func showTablesFrom(c *sql.DB, dbname string) ([]string, error) {
 	return tables, nil
 }
 
-func maxPaginationKey(db *sql.DB, table *TableSchema) (uint64, bool, error) {
-	primaryKeyColumn := table.GetPaginationColumn()
-	paginationKeyName := quoteField(primaryKeyColumn.Name)
-	query, args, err := sq.
-		Select(paginationKeyName).
-		From(QuotedTableName(table)).
-		OrderBy(fmt.Sprintf("%s DESC", paginationKeyName)).
-		Limit(1).
+func maxPaginationKey(db *sql.DB, table *TableSchema) (*PaginationKeyData, bool, error) {
+	columnsToSelect := []string{"*"}
+	query, args, err := DefaultBuildSelect(columnsToSelect, table, nil, 1, false).
 		ToSql()
 
 	if err != nil {
-		return 0, false, err
+		return nil, false, err
 	}
 
-	var maxPaginationKey uint64
-	err = db.QueryRow(query, args...).Scan(&maxPaginationKey)
+	rows, err := db.Query(query, args...)
 
-	switch {
-	case err == sqlorig.ErrNoRows:
-		return 0, false, nil
-	case err != nil:
-		return 0, false, err
-	default:
-		return maxPaginationKey, true, nil
+	if err != nil {
+		return nil, false, err
 	}
+
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, false, nil
+	}
+
+	rowData, err := ScanGenericRow(rows, len(table.Columns))
+	if err != nil {
+		return nil, false, err
+	}
+
+	paginationKeyData, err := NewPaginationKeyDataFromRow(rowData, table.PaginationKey)
+	return paginationKeyData, true, err
 }
 
 func isEmptyTable(db *sql.DB, table *TableSchema) (bool, error) {

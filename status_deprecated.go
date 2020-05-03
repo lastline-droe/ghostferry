@@ -16,8 +16,8 @@ type TableStatusDeprecated struct {
 	TableName                   string
 	PaginationKeyName           string
 	Status                      string
-	LastSuccessfulPaginationKey uint64
-	TargetPaginationKey         uint64
+	LastSuccessfulPaginationKey string
+	TargetPaginationKey         string
 }
 
 type StatusDeprecated struct {
@@ -56,10 +56,15 @@ type StatusDeprecated struct {
 }
 
 func getPaginationColumnName(table *TableSchema) (paginationKeyName string) {
-	paginationKeyName = "not paginated"
-	paginationColumn := table.GetPaginationColumn()
-	if paginationColumn != nil {
-		paginationKeyName = paginationColumn.Name
+	if table.PaginationKey == nil {
+		paginationKeyName = "not paginated"
+	} else {
+		for i, column := range table.PaginationKey.Columns {
+			if i > 0 {
+				paginationKeyName += ", "
+			}
+			paginationKeyName += column.Name
+		}
 	}
 
 	return
@@ -98,9 +103,19 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	lastSuccessfulPaginationKeys := serializedState.LastSuccessfulPaginationKeys
 	completedTables := serializedState.CompletedTables
 
-	targetPaginationKeys := make(map[string]uint64)
+	targetPaginationKeysData := make(map[string]string)
+	targetPaginationKeysProgress := make(map[string]uint64)
 	f.DataIterator.targetPaginationKeys.Range(func(k, v interface{}) bool {
-		targetPaginationKeys[k.(string)] = v.(uint64)
+		tableName := k.(string)
+		if v == nil {
+			targetPaginationKeysData[tableName] = "n/a"
+		} else {
+			paginationKeyData := v.(*PaginationKeyData)
+			targetPaginationKeysData[tableName] = paginationKeyData.String()
+			if progress, ok := paginationKeyData.ProgressData(); ok {
+				targetPaginationKeysProgress[tableName] = progress
+			}
+		}
 		return true
 	})
 
@@ -139,7 +154,7 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	}
 
 	for tableName, _ := range f.Tables {
-		if lastSuccessfulPaginationKey, ok := lastSuccessfulPaginationKeys[tableName]; ok && lastSuccessfulPaginationKey != 0 {
+		if lastSuccessfulPaginationKey, ok := lastSuccessfulPaginationKeys[tableName]; ok && lastSuccessfulPaginationKey != nil {
 			continue // already started, therefore not waiting
 		}
 
@@ -157,22 +172,30 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	sort.Strings(waitingTableNames)
 
 	for _, tableName := range completedTableNames {
+		lastSuccessfulPaginationKey := "n/a"
+		if lastSuccessfulPaginationKeys[tableName] != nil {
+			lastSuccessfulPaginationKey = lastSuccessfulPaginationKeys[tableName].String()
+		}
 		status.TableStatuses = append(status.TableStatuses, &TableStatusDeprecated{
 			TableName:                   tableName,
 			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "complete",
-			TargetPaginationKey:         targetPaginationKeys[tableName],
-			LastSuccessfulPaginationKey: lastSuccessfulPaginationKeys[tableName],
+			TargetPaginationKey:         targetPaginationKeysData[tableName],
+			LastSuccessfulPaginationKey: lastSuccessfulPaginationKey,
 		})
 	}
 
 	for _, tableName := range copyingTableNames {
+		lastSuccessfulPaginationKey := "n/a"
+		if lastSuccessfulPaginationKeys[tableName] != nil {
+			lastSuccessfulPaginationKey = lastSuccessfulPaginationKeys[tableName].String()
+		}
 		status.TableStatuses = append(status.TableStatuses, &TableStatusDeprecated{
 			TableName:                   tableName,
 			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "copying",
-			TargetPaginationKey:         targetPaginationKeys[tableName],
-			LastSuccessfulPaginationKey: lastSuccessfulPaginationKeys[tableName],
+			TargetPaginationKey:         targetPaginationKeysData[tableName],
+			LastSuccessfulPaginationKey: lastSuccessfulPaginationKey,
 		})
 	}
 
@@ -181,8 +204,8 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 			TableName:                   tableName,
 			PaginationKeyName:           getPaginationColumnName(f.Tables[tableName]),
 			Status:                      "waiting",
-			TargetPaginationKey:         targetPaginationKeys[tableName],
-			LastSuccessfulPaginationKey: 0,
+			TargetPaginationKey:         targetPaginationKeysData[tableName],
+			LastSuccessfulPaginationKey: "n/a",
 		})
 	}
 
@@ -192,12 +215,14 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	var totalPaginationKeysToCopy uint64 = 0
 	var completedPaginationKeys uint64 = 0
 	estimatedPaginationKeysPerSecond := f.StateTracker.EstimatedPaginationKeysPerSecond()
-	for _, targetPaginationKey := range targetPaginationKeys {
+	for _, targetPaginationKey := range targetPaginationKeysProgress {
 		totalPaginationKeysToCopy += targetPaginationKey
 	}
 
 	for _, completedPaginationKey := range lastSuccessfulPaginationKeys {
-		completedPaginationKeys += completedPaginationKey
+		if progress, ok := completedPaginationKey.ProgressData(); ok {
+			completedPaginationKeys += progress
+		}
 	}
 
 	status.ETA = time.Duration(math.Ceil(float64(totalPaginationKeysToCopy-completedPaginationKeys)/estimatedPaginationKeysPerSecond)) * time.Second

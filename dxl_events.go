@@ -21,33 +21,50 @@ type RowData []interface{}
 // But we have other code in ghostferry that generates DMLEvents that may
 // contain unsigned integer types - so we unify the reading of such columns in
 // this helper method
-func (r RowData) GetUint64(colIdx int) (res uint64, err error) {
+func (r RowData) GetInt64(colIdx int) (res int64, err error) {
 	rowValue := r[colIdx]
 	switch v := rowValue.(type) {
 	case uint64:
-		res = v
+		res = int64(v)
 	case uint32:
-		res = uint64(v)
+		res = int64(v)
 	case uint16:
-		res = uint64(v)
+		res = int64(v)
 	case uint8:
-		res = uint64(v)
+		res = int64(v)
 	case uint:
-		res = uint64(v)
+		res = int64(v)
+	case int64:
+		res = v
+	case int32:
+		res = int64(v)
+	case int16:
+		res = int64(v)
+	case int8:
+		res = int64(v)
+	case int:
+		res = int64(v)
 	case []byte:
 		valueString := string(v)
-		res, err = strconv.ParseUint(valueString, 10, 64)
+		res, err = strconv.ParseInt(valueString, 10, 64)
 	case string:
-		res, err = strconv.ParseUint(v, 10, 64)
+		res, err = strconv.ParseInt(v, 10, 64)
 	default:
-		signedInt := reflect.ValueOf(rowValue).Int()
-		if signedInt < 0 {
-			err = fmt.Errorf("expected position %d in row to contain an unsigned number", colIdx)
-		} else {
-			res = uint64(signedInt)
-		}
+		res = reflect.ValueOf(rowValue).Int()
 	}
 	return
+}
+
+func (r RowData) GetString(colIdx int) string {
+	rowValue := r[colIdx]
+	switch v := rowValue.(type) {
+	case []byte:
+		return string(v)
+	case string:
+		return v
+	default:
+		return reflect.ValueOf(rowValue).String()
+	}
 }
 
 // a DXLEvent is the base for DDL or DML
@@ -65,7 +82,7 @@ type DMLEvent interface {
 	TableSchema() *TableSchema
 	OldValues() RowData
 	NewValues() RowData
-	PaginationKey() (uint64, error)
+	VerifierPaginationKey() (uint64, error)
 }
 
 // The base of DMLEvent/DDLEvent to provide the necessary methods.
@@ -148,8 +165,8 @@ func (e *BinlogInsertEvent) AsSQLString(schemaName, tableName string) (string, e
 	return query, nil
 }
 
-func (e *BinlogInsertEvent) PaginationKey() (uint64, error) {
-	return paginationKeyFromEventData(e.table, e.newValues)
+func (e *BinlogInsertEvent) VerifierPaginationKey() (uint64, error) {
+	return verifierPaginationKeyFromEventData(e.table, e.newValues)
 }
 
 type BinlogUpdateEvent struct {
@@ -207,8 +224,8 @@ func (e *BinlogUpdateEvent) AsSQLString(schemaName, tableName string) (string, e
 	return query, nil
 }
 
-func (e *BinlogUpdateEvent) PaginationKey() (uint64, error) {
-	return paginationKeyFromEventData(e.table, e.newValues)
+func (e *BinlogUpdateEvent) VerifierPaginationKey() (uint64, error) {
+	return verifierPaginationKeyFromEventData(e.table, e.newValues)
 }
 
 type BinlogDeleteEvent struct {
@@ -253,8 +270,8 @@ func (e *BinlogDeleteEvent) AsSQLString(schemaName, tableName string) (string, e
 	return query, nil
 }
 
-func (e *BinlogDeleteEvent) PaginationKey() (uint64, error) {
-	return paginationKeyFromEventData(e.table, e.oldValues)
+func (e *BinlogDeleteEvent) VerifierPaginationKey() (uint64, error) {
+	return verifierPaginationKeyFromEventData(e.table, e.oldValues)
 }
 
 func NewBinlogDMLEvents(table *TableSchema, ev *replication.BinlogEvent, pos BinlogPosition, time time.Time) ([]DMLEvent, error) {
@@ -604,10 +621,29 @@ func appendEscapedBuffer(buffer, value []byte, isJSON bool) []byte {
 	return buffer
 }
 
-func paginationKeyFromEventData(table *TableSchema, rowData RowData) (uint64, error) {
+func verifierPaginationKeyFromEventData(table *TableSchema, rowData RowData) (uint64, error) {
 	if err := verifyValuesHasTheSameLengthAsColumns(table, rowData); err != nil {
 		return 0, err
 	}
 
-	return rowData.GetUint64(table.GetPaginationKeyIndex())
+	if table.PaginationKey == nil {
+		return 0, fmt.Errorf("table %s does not have a pagination key", table)
+	}
+
+	if !table.PaginationKey.IsLinearUnsignedKey() {
+		return 0, UnsupportedPaginationKeyError(table.Schema, table.Name, table.PaginationKey.String())
+	}
+
+	value, err := rowData.GetInt64(table.PaginationKey.ColumnIndices[0])
+	if err != nil {
+		return 0, err
+	}
+
+	// for legacy-compatibility, we allow signed pagination keys, so we have to
+	// make sure no signed data snuck in
+	if value < 0 {
+		return 0, fmt.Errorf("table %s contains an unsupported (signed) pagination key value %d", table, value)
+	}
+
+	return uint64(value), nil
 }

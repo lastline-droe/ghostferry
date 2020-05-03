@@ -222,13 +222,13 @@ func (t *IterativeVerifierTestSuite) TestChangingDataChangesHash() {
 func (t *IterativeVerifierTestSuite) TestDeduplicatesHashes() {
 	t.InsertRow(42, "foo")
 
-	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.GetPaginationColumn().Name, t.table.Columns, []uint64{42, 42})
+	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.PaginationKey.Columns[0].Name, t.table.Columns, []uint64{42, 42})
 	t.Require().Nil(err)
 	t.Require().Equal(1, len(hashes))
 }
 
 func (t *IterativeVerifierTestSuite) TestDoesntReturnHashIfRecordDoesntExist() {
-	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.GetPaginationColumn().Name, t.table.Columns, []uint64{42, 42})
+	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.PaginationKey.Columns[0].Name, t.table.Columns, []uint64{42, 42})
 	t.Require().Nil(err)
 	t.Require().Equal(0, len(hashes))
 }
@@ -346,7 +346,7 @@ func (t *IterativeVerifierTestSuite) DeleteRow(id int) {
 }
 
 func (t *IterativeVerifierTestSuite) GetHashes(ids []uint64) []string {
-	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.GetPaginationColumn().Name, t.table.Columns, ids)
+	hashes, err := t.verifier.GetHashes(t.db, t.table.Schema, t.table.Name, t.table.PaginationKey.Columns[0].Name, t.table.Columns, ids)
 	t.Require().Nil(err)
 	t.Require().Equal(len(hashes), len(ids))
 

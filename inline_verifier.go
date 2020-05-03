@@ -249,14 +249,14 @@ func (v *InlineVerifier) Result() (VerificationResultAndStatus, error) {
 func (v *InlineVerifier) CheckFingerprintInline(tx *sql.Tx, targetSchema, targetTable string, sourceBatch InsertRowBatch) ([]uint64, error) {
 	table := sourceBatch.TableSchema()
 
-	if !sourceBatch.ValuesContainPaginationKey() {
+	if table.PaginationKey == nil {
 		v.logger.Debugf("skip fingerprint check on %s.%s", table.Schema, table.Name)
 		return nil, nil
 	}
 
 	paginationKeys := make([]uint64, len(sourceBatch.Values()))
-	for i, row := range sourceBatch.Values() {
-		paginationKey, err := row.GetUint64(sourceBatch.PaginationKeyIndex())
+	for i, _ := range sourceBatch.Values() {
+		paginationKey, err := sourceBatch.VerifierPaginationKey(i)
 		if err != nil {
 			return nil, err
 		}
@@ -274,8 +274,8 @@ func (v *InlineVerifier) CheckFingerprintInline(tx *sql.Tx, targetSchema, target
 	sourceFingerprints := sourceBatch.Fingerprints()
 	sourceDecompressedData := make(map[uint64]map[string][]byte)
 
-	for _, rowData := range sourceBatch.Values() {
-		paginationKey, err := rowData.GetUint64(sourceBatch.PaginationKeyIndex())
+	for i, rowData := range sourceBatch.Values() {
+		paginationKey, err := sourceBatch.VerifierPaginationKey(i)
 		if err != nil {
 			return nil, err
 		}
@@ -420,7 +420,11 @@ func (v *InlineVerifier) getFingerprintDataFromTargetDb(schemaName, tableName st
 }
 
 func (v *InlineVerifier) getFingerprintDataFromDb(db *sql.DB, stmtCache *StmtCache, schemaName, tableName string, tx *sql.Tx, table *TableSchema, paginationKeys []uint64) (map[uint64][]byte, map[uint64]map[string][]byte, error) {
-	fingerprintQuery := table.FingerprintQuery(schemaName, tableName, len(paginationKeys))
+	fingerprintQuery, err := table.FingerprintQuery(schemaName, tableName, len(paginationKeys))
+	if err != nil {
+		return nil, nil, err
+	}
+
 	fingerprintStmt, err := stmtCache.StmtFor(db, fingerprintQuery)
 	if err != nil {
 		return nil, nil, err
@@ -577,7 +581,7 @@ func (v *InlineVerifier) binlogEventListener(event *ReplicationEvent) error {
 	// longer applies
 	if ev, ok := event.BinlogEvent.Event.(*replication.RowsEvent); ok {
 		table := v.TableSchemaCache.Get(string(ev.Table.Schema), string(ev.Table.Table))
-		if table == nil || table.PaginationKeyColumn == nil {
+		if table == nil || table.PaginationKey == nil {
 			if IncrediblyVerboseLogging {
 				v.logger.Debugf("Ignoring binlog event for %s.%s", ev.Table.Schema, ev.Table.Table)
 			}
@@ -601,7 +605,7 @@ func (v *InlineVerifier) binlogEventListener(event *ReplicationEvent) error {
 				}
 			}
 
-			paginationKey, err := dmlEv.PaginationKey()
+			paginationKey, err := dmlEv.VerifierPaginationKey()
 			if err != nil {
 				return err
 			}

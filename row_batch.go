@@ -1,6 +1,7 @@
 package ghostferry
 
 import (
+	"fmt"
 	"strings"
 )
 
@@ -14,27 +15,20 @@ type RowBatch interface {
 type InsertRowBatch interface {
 	RowBatch
 	Values() []RowData
-	PaginationKeyIndex() int
-	ValuesContainPaginationKey() bool
+	VerifierPaginationKey(int) (uint64, error)
 	Fingerprints() map[uint64][]byte
 }
 
 type DataRowBatch struct {
-	values             []RowData
-	paginationKeyIndex int
-	table              *TableSchema
-	fingerprints       map[uint64][]byte
+	values        []RowData
+	table         *TableSchema
+	fingerprints  map[uint64][]byte
 }
 
 func NewDataRowBatch(table *TableSchema, values []RowData) *DataRowBatch {
-	return NewDataRowBatchWithPaginationKey(table, values, -1)
-}
-
-func NewDataRowBatchWithPaginationKey(table *TableSchema, values []RowData, paginationKeyIndex int) *DataRowBatch {
 	return &DataRowBatch{
-		values:             values,
-		paginationKeyIndex: paginationKeyIndex,
-		table:              table,
+		values: values,
+		table:  table,
 	}
 }
 
@@ -42,16 +36,30 @@ func (e *DataRowBatch) Values() []RowData {
 	return e.values
 }
 
-func (e *DataRowBatch) PaginationKeyIndex() int {
-	return e.paginationKeyIndex
-}
-
-func (e *DataRowBatch) ValuesContainPaginationKey() bool {
-	return e.paginationKeyIndex >= 0
-}
-
 func (e *DataRowBatch) Size() int {
 	return len(e.values)
+}
+
+func (e *DataRowBatch) VerifierPaginationKey(rowIndex int) (paginationValue uint64, err error) {
+	if e.table.PaginationKey == nil {
+		err = fmt.Errorf("table %s does not have a pagination key", e.table)
+	} else if e.table.PaginationKey.IsLinearUnsignedKey() {
+		var value int64
+		value, err = e.values[rowIndex].GetInt64(e.table.PaginationKey.ColumnIndices[0])
+		if err == nil {
+			// for legacy-compatibility, we allow signed pagination keys, so we have to
+			// make sure no signed data snuck in
+			if value < 0 {
+				err = fmt.Errorf("table %s contains an unsupported (signed) pagination key value %d", e.table, value)
+			} else {
+				paginationValue = uint64(value)
+			}
+		}
+	} else {
+		err = UnsupportedPaginationKeyError(e.table.Schema, e.table.Name, e.table.PaginationKey.String())
+	}
+
+	return
 }
 
 func (e *DataRowBatch) IsTableComplete() bool {

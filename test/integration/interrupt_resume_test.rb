@@ -35,7 +35,7 @@ class InterruptResumeTest < GhostferryTestCase
     # in the resume state exactly, but there is a race condition between
     # committing the data transaction and updating the resume data.
     # See comments in batch_writer.go on committing the transaction for details.
-    assert_operator last_successful_id, :>=, dumped_state["LastSuccessfulPaginationKeys"]["#{DEFAULT_DB}.#{DEFAULT_TABLE}"]
+    assert_operator last_successful_id, :>=, dumped_state["LastSuccessfulPaginationKeys"]["#{DEFAULT_DB}.#{DEFAULT_TABLE}"]["Values"][0]
   end
 
   def test_interrupt_and_resume_without_last_known_schema_cache
