@@ -20,9 +20,9 @@ const (
 	VerifierTypeInline         = "Inline"
 	VerifierTypeNoVerification = "NoVerification"
 
-	LockTypeSourceDB = "LockOnSourceDB"
-	LockTypeInGhostferry = "LockInGhostferry"
-	LockTypeNone = "None"
+	LockStrategySourceDB     = "LockOnSourceDB"
+	LockStrategyInGhostferry = "LockInGhostferry"
+	LockStrategyNone         = "None"
 )
 
 type TLSConfig struct {
@@ -654,8 +654,8 @@ func (c *Config) ValidateConfig() error {
 	}
 
 	if c.LockStrategy == "" {
-		c.LockStrategy = LockTypeSourceDB
-	} else if c.LockStrategy != LockTypeSourceDB && c.LockStrategy != LockTypeInGhostferry && c.LockStrategy != LockTypeNone {
+		c.LockStrategy = LockStrategySourceDB
+	} else if c.LockStrategy != LockStrategySourceDB && c.LockStrategy != LockStrategyInGhostferry && c.LockStrategy != LockStrategyNone {
 		return fmt.Errorf("Invalid LockStrategy specified (set to %s)", c.LockStrategy)
 	}
 

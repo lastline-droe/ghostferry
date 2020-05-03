@@ -392,7 +392,7 @@ func (b *BinlogWriter) writeEvents(events []DXLEventWrapper) error {
 		// for DML events, we need to make sure we synchronize with the
 		// data-iterator - for details on why, see the corresponding
 		// data-iterator code
-		if b.LockStrategy == LockTypeInGhostferry {
+		if b.LockStrategy == LockStrategyInGhostferry {
 			if dmlEvent, ok := ev.DXLEvent.(DMLEvent); ok {
 				fullTableName := dmlEvent.TableSchema().Table.String()
 				if _, found := locksToObtain[fullTableName]; !found {

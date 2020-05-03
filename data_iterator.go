@@ -276,11 +276,11 @@ func (d *DataIterator) processPaginatedTable(table *TableSchema) error {
 	// source data is not modified between reading from the source and writing
 	// the batch to the target.
 	var cursor *PaginatedCursor
-	if d.lockStrategy == LockTypeSourceDB {
+	if d.lockStrategy == LockStrategySourceDB {
 		cursor = d.CursorConfig.NewPaginatedCursor(table, startPaginationKeyData, targetPaginationKeyData)
 	} else {
 		var tableLock *sync.RWMutex
-		if d.lockStrategy == LockTypeInGhostferry {
+		if d.lockStrategy == LockStrategyInGhostferry {
 			tableLock = d.StateTracker.GetTableLock(table.String())
 		}
 		cursor = d.CursorConfig.NewPaginatedCursorWithoutRowLock(table, startPaginationKeyData, targetPaginationKeyData, tableLock)
@@ -346,10 +346,10 @@ func (d *DataIterator) processUnpaginatedTable(table *TableSchema) error {
 	logger.Debug("Starting full-table copy")
 
 	var tableLock *sync.RWMutex
-	if d.lockStrategy == LockTypeInGhostferry {
+	if d.lockStrategy == LockStrategyInGhostferry {
 		tableLock = d.StateTracker.GetTableLock(table.String())
 	}
-	cursor := d.CursorConfig.NewFullTableCursor(table, d.lockStrategy == LockTypeSourceDB, tableLock)
+	cursor := d.CursorConfig.NewFullTableCursor(table, d.lockStrategy == LockStrategySourceDB, tableLock)
 
 	err := cursor.Each(func(batch RowBatch) error {
 		metrics.Count("RowEvent", int64(batch.Size()), []MetricTag{
