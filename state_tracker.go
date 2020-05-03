@@ -233,6 +233,9 @@ func (s *StateTracker) GetTableLock(table string) *sync.RWMutex {
 	s.CopyRWMutex.Lock()
 	defer s.CopyRWMutex.Unlock()
 
+	// table locks are needed only for synchronizing data copy and binlog
+	// writing. We optimize this into a NULL-lock if we know this race is
+	// not possible
 	if s.completedTables[table] {
 		return nil
 	}
