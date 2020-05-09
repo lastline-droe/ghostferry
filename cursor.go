@@ -175,7 +175,7 @@ type CursorConfig struct {
 	Throttler Throttler
 
 	ColumnsToSelect []string
-	BuildSelect     func([]string, *TableSchema, *PaginationKeyData, uint64) (squirrel.SelectBuilder, error)
+	BuildSelect     func([]string, *TableSchema, *PaginationKeyData, uint64, bool) (squirrel.SelectBuilder, error)
 	BatchSize       uint64
 	ReadRetries     int
 
@@ -315,13 +315,13 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 	var selectBuilder squirrel.SelectBuilder
 
 	if c.BuildSelect != nil {
-		selectBuilder, err = c.BuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize)
+		selectBuilder, err = c.BuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, c.IterateInDescendingOrder)
 		if err != nil {
 			c.logger.WithError(err).Error("failed to apply filter for select")
 			return
 		}
 	} else {
-		selectBuilder = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, true)
+		selectBuilder = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, c.IterateInDescendingOrder)
 	}
 
 	if c.RowLock {
@@ -606,7 +606,7 @@ func ScanByteRow(rows *sqlorig.Rows, columnCount int) ([][]byte, error) {
 	return values, err
 }
 
-func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey *PaginationKeyData, batchSize uint64, sortAscending bool) squirrel.SelectBuilder {
+func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey *PaginationKeyData, batchSize uint64, sortDescending bool) squirrel.SelectBuilder {
 	stmt := squirrel.Select(columns...).
 		From(QuotedTableName(table))
 
@@ -666,10 +666,10 @@ func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey 
 				andSql += quoteField(column.Name)
 				if i < maxIndexToInclude {
 					andSql += "="
-				} else if sortAscending {
-					andSql += ">"
-				} else {
+				} else if sortDescending {
 					andSql += "<"
+				} else {
+					andSql += ">"
 				}
 				andSql += "?"
 				args = append(args, lastPaginationKey.Values[i])
@@ -689,7 +689,7 @@ func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey 
 	orderBy := make([]string, len(table.PaginationKey.Columns))
 	for i, column := range table.PaginationKey.Columns {
 		orderBy[i] = quoteField(column.Name)
-		if !sortAscending {
+		if sortDescending {
 			orderBy[i] += " DESC"
 		}
 	}

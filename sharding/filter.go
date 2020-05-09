@@ -25,7 +25,7 @@ type ShardedCopyFilter struct {
 	missingShardingKeyIndexLogged sync.Map
 }
 
-func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.TableSchema, lastPaginationKey *ghostferry.PaginationKeyData, batchSize uint64) (sq.SelectBuilder, error) {
+func (f *ShardedCopyFilter) BuildSelect(columns []string, table *ghostferry.TableSchema, lastPaginationKey *ghostferry.PaginationKeyData, batchSize uint64, sortDescending bool) (sq.SelectBuilder, error) {
 	if !table.PaginationKey.IsLinearUnsignedKey() {
 		return sq.SelectBuilder{}, ghostferry.UnsupportedPaginationKeyError(table.Schema, table.Name, table.PaginationKey.String())
 	}

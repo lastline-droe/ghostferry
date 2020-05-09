@@ -74,7 +74,7 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	}
 
 	d.logger.WithField("tablesCount", len(tables)).Info("starting data iterator run")
-	paginatedTables, unpaginatedTables, err := MaxPaginationKeys(d.DB, tables, d.logger)
+	paginatedTables, unpaginatedTables, err := GetTargetPaginationKeys(d.DB, tables, d.CursorConfig.IterateInDescendingOrder, d.logger)
 	if err != nil {
 		d.ErrorHandler.Fatal("data_iterator", err)
 	}
@@ -92,7 +92,7 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 	}
 	unpaginatedTables = tmp
 
-	for table, maxPaginationKey := range paginatedTables {
+	for table, targetPaginationKey := range paginatedTables {
 		tableName := table.String()
 		if d.StateTracker.IsTableComplete(tableName) {
 			// In a previous run, the table may have been completed.
@@ -100,7 +100,7 @@ func (d *DataIterator) Run(tables []*TableSchema) {
 			d.logger.WithField("table", tableName).Debug("table already copied completely, removing from paginagted table copy list")
 			delete(paginatedTables, table)
 		} else {
-			d.targetPaginationKeys.Store(table.String(), maxPaginationKey)
+			d.targetPaginationKeys.Store(table.String(), targetPaginationKey)
 		}
 	}
 
