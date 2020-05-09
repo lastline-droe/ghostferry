@@ -49,7 +49,7 @@ func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelect() {
 }
 
 func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelectDescending() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1` DESC LIMIT 5")
@@ -71,7 +71,7 @@ func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeDataDe
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`<? ORDER BY `col1` DESC LIMIT 5")
@@ -136,7 +136,7 @@ func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelect() {
 }
 
 func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectDescending() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1` DESC, `col2` DESC, `col3` DESC LIMIT 5")
@@ -158,7 +158,7 @@ func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeDat
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`<? OR `col1`=? AND `col2`<? OR `col1`=? AND `col2`=? AND `col3`<? ORDER BY `col1` DESC, `col2` DESC, `col3` DESC LIMIT 5")
