@@ -85,7 +85,7 @@ func (t *CopyFilterTestSuite) SetupTest() {
 }
 
 func (t *CopyFilterTestSuite) TestSelectsRegularTables() {
-	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024)
+	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024, false)
 	t.Require().Nil(err)
 
 	sql, args, err := selectBuilder.ToSql()
@@ -96,7 +96,7 @@ func (t *CopyFilterTestSuite) TestSelectsRegularTables() {
 
 func (t *CopyFilterTestSuite) TestFallsBackToLessGoodIndex() {
 	t.normalTable.Indexes[2].Columns = []string{"data"} // Remove good index.
-	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024)
+	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024, false)
 	t.Require().Nil(err)
 
 	sql, args, err := selectBuilder.ToSql()
@@ -108,7 +108,7 @@ func (t *CopyFilterTestSuite) TestFallsBackToLessGoodIndex() {
 func (t *CopyFilterTestSuite) TestFallsBackToIgnoredPrimaryIndex() {
 	t.normalTable.Indexes[1].Columns = []string{"data"} // Remove less good index.
 	t.normalTable.Indexes[2].Columns = []string{"data"} // Remove good index.
-	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024)
+	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.normalTable, t.paginationKeyCursor, 1024, false)
 	t.Require().Nil(err)
 
 	sql, args, err := selectBuilder.ToSql()
@@ -118,7 +118,7 @@ func (t *CopyFilterTestSuite) TestFallsBackToIgnoredPrimaryIndex() {
 }
 
 func (t *CopyFilterTestSuite) TestSelectsJoinedTables() {
-	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.joinedTable, t.paginationKeyCursor, 1024)
+	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.joinedTable, t.paginationKeyCursor, 1024, false)
 	t.Require().Nil(err)
 
 	sql, args, err := selectBuilder.ToSql()
@@ -128,7 +128,7 @@ func (t *CopyFilterTestSuite) TestSelectsJoinedTables() {
 }
 
 func (t *CopyFilterTestSuite) TestSelectsPrimaryKeyTables() {
-	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.primaryKeyTable, t.paginationKeyCursor, 1024)
+	selectBuilder, err := t.filter.BuildSelect([]string{"*"}, t.primaryKeyTable, t.paginationKeyCursor, 1024, false)
 	t.Require().Nil(err)
 
 	sql, args, err := selectBuilder.ToSql()

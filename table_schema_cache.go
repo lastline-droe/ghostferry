@@ -172,7 +172,7 @@ func QuotedTableNameFromString(database, table string) string {
 	return fmt.Sprintf("`%s`.`%s`", database, table)
 }
 
-func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) (paginatedTables map[*TableSchema]*PaginationKeyData, unpaginatedTables []*TableSchema, err error) {
+func GetTargetPaginationKeys(db *sql.DB, tables []*TableSchema, iterateInDescendingOrder bool, logger *logrus.Entry) (paginatedTables map[*TableSchema]*PaginationKeyData, unpaginatedTables []*TableSchema, err error) {
 	paginatedTables = make(map[*TableSchema]*PaginationKeyData)
 	unpaginatedTables = make([]*TableSchema, 0, len(tables))
 
@@ -193,22 +193,22 @@ func MaxPaginationKeys(db *sql.DB, tables []*TableSchema, logger *logrus.Entry) 
 			continue
 		}
 
-		maxPaginationKey, maxPaginationKeyExists, paginationErr := maxPaginationKey(db, table)
+		targetPaginationKey, targetPaginationKeyExists, paginationErr := targetPaginationKey(db, table, iterateInDescendingOrder)
 		if paginationErr != nil {
-			logger.WithError(paginationErr).Errorf("failed to get max primary key %s", table.PaginationKey)
+			logger.WithError(paginationErr).Errorf("failed to get target primary key %s", table.PaginationKey)
 			err = paginationErr
 			return
 		}
 
-		if !maxPaginationKeyExists {
+		if !targetPaginationKeyExists {
 			// potential race in the setup
 			logger.Debugf("tracking as unpaginated table (no pagination key)")
 			unpaginatedTables = append(unpaginatedTables, table)
 			continue
 		}
 
-		logger.Debugf("tracking as paginated table with max-pagination %s", maxPaginationKey)
-		paginatedTables[table] = maxPaginationKey
+		logger.Debugf("tracking as paginated table with target-pagination %s", targetPaginationKey)
+		paginatedTables[table] = targetPaginationKey
 	}
 
 	return
@@ -542,9 +542,9 @@ func showTablesFrom(c *sql.DB, dbname string) ([]string, error) {
 	return tables, nil
 }
 
-func maxPaginationKey(db *sql.DB, table *TableSchema) (*PaginationKeyData, bool, error) {
+func targetPaginationKey(db *sql.DB, table *TableSchema, iterateInDescendingOrder bool) (*PaginationKeyData, bool, error) {
 	columnsToSelect := []string{"*"}
-	query, args, err := DefaultBuildSelect(columnsToSelect, table, nil, 1, false).
+	query, args, err := DefaultBuildSelect(columnsToSelect, table, nil, 1, !iterateInDescendingOrder).
 		ToSql()
 
 	if err != nil {
