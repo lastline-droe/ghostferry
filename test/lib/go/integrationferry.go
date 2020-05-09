@@ -275,6 +275,13 @@ func NewStandardConfig() (*ghostferry.Config, error) {
 		}
 	}
 
+	if iterateInDescendingOrder := os.Getenv("GHOSTFERRY_ITERATE_IN_DESCENDING_ORDER"); iterateInDescendingOrder != "" {
+		err = json.Unmarshal([]byte(iterateInDescendingOrder), &config.IterateInDescendingOrder)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return config, config.ValidateConfig()
 }
 
