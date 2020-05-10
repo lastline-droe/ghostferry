@@ -256,6 +256,10 @@ module GhostferryHelper
           environment["GHOSTFERRY_DELAYDATAITERATIONUNTILBINLOGWRITERSHUTDOWN"] = "true"
         end
 
+        if @config[:iterate_in_descending_order]
+          environment["GHOSTFERRY_ITERATE_IN_DESCENDING_ORDER"] = "true"
+        end
+
         @logger.info("starting ghostferry test binary #{@compiled_binary_path}")
         Open3.popen3(environment, @compiled_binary_path) do |stdin, stdout, stderr, wait_thr|
           stdin.puts(resuming_state) unless resuming_state.nil?
