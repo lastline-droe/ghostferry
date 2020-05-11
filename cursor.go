@@ -5,6 +5,7 @@ import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"strings"
+	"sync"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/siddontang/go-mysql/schema"
@@ -18,9 +19,24 @@ type SqlPreparer interface {
 
 type SqlDBWithFakeRollback struct {
 	*sql.DB
+	lock *sync.RWMutex
+}
+
+func NewSqlDBWithFakeRollback(db *sql.DB, lock *sync.RWMutex) *SqlDBWithFakeRollback {
+	tx := &SqlDBWithFakeRollback{
+		DB:   db,
+		lock: lock,
+	}
+	if lock != nil {
+		lock.Lock()
+	}
+	return tx
 }
 
 func (d *SqlDBWithFakeRollback) Rollback() error {
+	if d.lock != nil {
+		d.lock.Unlock()
+	}
 	return nil
 }
 
@@ -194,9 +210,12 @@ func (c *CursorConfig) NewPaginatedCursor(table *TableSchema, startPaginationKey
 }
 
 // returns a new PaginatedCursor with an embedded copy of itself
-func (c *CursorConfig) NewPaginatedCursorWithoutRowLock(table *TableSchema, startPaginationKey, maxPaginationKey *PaginationKeyData) *PaginatedCursor {
+func (c *CursorConfig) NewPaginatedCursorWithoutRowLock(table *TableSchema, startPaginationKey, maxPaginationKey *PaginationKeyData, tableLock *sync.RWMutex) *PaginatedCursor {
 	cursor := c.NewPaginatedCursor(table, startPaginationKey, maxPaginationKey)
 	cursor.RowLock = false
+	// NOTE: We only allow internal table locking, if row-locking is disabled
+	// to avoid a potential deadlock
+	cursor.tableLock = tableLock
 	return cursor
 }
 
@@ -209,6 +228,7 @@ type PaginatedCursor struct {
 
 	paginationKeyColumn         *PaginationKey
 	lastSuccessfulPaginationKey *PaginationKeyData
+	tableLock                   *sync.RWMutex
 	logger                      *logrus.Entry
 }
 
@@ -249,7 +269,7 @@ func (c *PaginatedCursor) Each(f func(RowBatch) error) error {
 					return err
 				}
 			} else {
-				tx = &SqlDBWithFakeRollback{c.DB}
+				tx = NewSqlDBWithFakeRollback(c.DB, c.tableLock)
 			}
 
 			batch, paginationKeypos, err = c.Fetch(tx)
@@ -407,13 +427,20 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 }
 
 // returns a new PaginatedCursor with an embedded copy of itself
-func (c *CursorConfig) NewFullTableCursor(table *TableSchema, lockTable bool) *FullTableCursor {
+func (c *CursorConfig) NewFullTableCursor(table *TableSchema, lockOnDB bool, tableLock *sync.RWMutex) *FullTableCursor {
+	// NOTE: We only allow internal table locking, if row-locking is disabled
+	// to avoid a potential deadlock
+	if lockOnDB && tableLock != nil {
+		panic("invalid configuration using DB and table locking")
+	}
+
 	return &FullTableCursor{
 		DB:          c.DB,
 		Table:       table,
 		BatchSize:   c.BatchSize,
 		ReadRetries: c.ReadRetries,
-		lockTable:   lockTable,
+		lockOnDB:    lockOnDB,
+		tableLock:   tableLock,
 	}
 }
 
@@ -423,7 +450,8 @@ type FullTableCursor struct {
 	BatchSize   uint64
 	ReadRetries int
 
-	lockTable bool
+	lockOnDB  bool
+	tableLock *sync.RWMutex
 	logger    *logrus.Entry
 }
 
@@ -445,7 +473,7 @@ func (c *FullTableCursor) Each(f func(RowBatch) error) error {
 
 	err = WithRetries(c.ReadRetries, 0, c.logger, "fetch rows", func() (err error) {
 		var tx SqlPreparerAndRollbacker
-		if c.lockTable {
+		if c.lockOnDB {
 			tx, err = c.DB.Begin()
 			if err != nil {
 				return err
@@ -468,7 +496,13 @@ func (c *FullTableCursor) Each(f func(RowBatch) error) error {
 				return err
 			}
 		} else {
-			tx = &SqlDBWithFakeRollback{c.DB}
+			tx = &SqlDBWithFakeRollback{DB: c.DB}
+			if c.tableLock != nil {
+				c.tableLock.Lock()
+				defer func() {
+					c.tableLock.Unlock()
+				}()
+			}
 		}
 
 		rowOffset := 0

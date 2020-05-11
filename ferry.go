@@ -133,6 +133,7 @@ func (f *Ferry) NewBinlogWriter() *BinlogWriter {
 		BatchSize:          f.Config.BinlogEventBatchSize,
 		WriteRetries:       f.Config.DBWriteRetries,
 		ApplySchemaChanges: f.Config.ReplicateSchemaChanges,
+		LockStrategy:       f.Config.LockStrategy,
 
 		ErrorHandler:                f.ErrorHandler,
 		StateTracker:                f.StateTracker,

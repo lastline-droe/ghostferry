@@ -92,14 +92,14 @@ Features/fixes added in this fork include
       trivial rewrites of schema changing statements when tables are altered,
       renamed, created, or deleted.
 - support [reading from (read-only) DB replica](https://github.com/Lastline-Inc/ghostferry/issues/22):
-  under certain conditions, replicating data from a DB slave may be safe and
-  required. Furthermore, it may not be possible to lock inserts on the source
-  from the context of ghostferry.
-  A set of optional flags allow disabling locking and checking for replication
-  delay when reading from the source, if the user knows that the operation is
-  safe.
+  allow using locks within `Ghostferry` (instead of on the source database) to
+  avoid race conditions between the data copy and binlog replication. The
+  upstream version of `Ghostferry` locks tables on the source, potentially
+  interferring with the application. Furthermore, by using locks outside the
+  DB, it is possible to replicate from read-only sources where locking is not
+  an option (e.g., cloud-SQL).
 - support [non-int primary keys](https://github.com/Lastline-Inc/ghostferry/issues/24):
-  Extend `Ghostferry` to support signed/unsigned integers, string, and
+  extend `Ghostferry` to support signed/unsigned integers, string, and
   composite primary keys (that use ints and strings). This vastly reduces the
   types of tables for which "full copy" is required.  
   Additionally support iterating over table rows to copy in descending order.

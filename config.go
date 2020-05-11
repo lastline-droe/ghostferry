@@ -19,6 +19,10 @@ const (
 	VerifierTypeIterative      = "Iterative"
 	VerifierTypeInline         = "Inline"
 	VerifierTypeNoVerification = "NoVerification"
+
+	LockStrategySourceDB     = "LockOnSourceDB"
+	LockStrategyInGhostferry = "LockInGhostferry"
+	LockStrategyNone         = "None"
 )
 
 type TLSConfig struct {
@@ -483,26 +487,20 @@ type Config struct {
 	// Optional: defaults to false
 	AllowReplicationFromReplica bool
 
-	// When copying a table with pagination, do not lock the source table for
-	// inserts. This may be an unsafe operation if the source table may be
-	// deleted from.
-	// Use only if the application guarantees that no rows are deleted from the
-	// tables that are copied with pagination.
+	// This specifies how to prevent races between the data copy and binlog
+	// streaming. Possible values are:
+	// - LockOnSourceDB: obtain a table lock on the source table while copying
+	//   data, which will prevent any type of data modification on the source
+	//   DB; this is the strictest method but may intervene with the
+	//   application trying to insert data,
+	// - LockInGhostferry: obtain a lock in ghostferry, preventing updates to
+	//   the target DB while copying data; this should be sufficient in most
+	//   scenarios, and
+	// - None: do not perform locking, assume the application does not update
+	//   or delete data in a way that races may occur.
 	//
-	// Optional: defaults to false
-	CopyPaginatedTablesWithoutLock bool
-
-	// When copying a table without pagination ("full table" copies), do not
-	// lock the source table for inserts. This is an unsafe operation if the
-	// source table may be deleted from, as the copy may skip over rows, but
-	// it may be a requirement if the source DB is read-only (and thus locking
-	// is not possible).
-	// Use only if the application guarantees that no rows are deleted from the
-	// tables that are copied without pagination, or if tables are smaller than
-	// the batch size (in which case no locking is needed).
-	//
-	// Optional: defaults to false
-	CopyUnpaginatedTablesWithoutLock bool
+	// Optional: defaults to "LockOnSourceDB"
+	LockStrategy string
 
 	// This specifies whether or not Ferry.Run will handle SIGINT and SIGTERM
 	// by dumping the current state to stdout and the error HTTP callback.
@@ -653,6 +651,12 @@ func (c *Config) ValidateConfig() error {
 		if err := c.InlineVerifierConfig.Validate(); err != nil {
 			return fmt.Errorf("InlineVerifierConfig invalid: %v", err)
 		}
+	}
+
+	if c.LockStrategy == "" {
+		c.LockStrategy = LockStrategySourceDB
+	} else if c.LockStrategy != LockStrategySourceDB && c.LockStrategy != LockStrategyInGhostferry && c.LockStrategy != LockStrategyNone {
+		return fmt.Errorf("Invalid LockStrategy specified (set to %s)", c.LockStrategy)
 	}
 
 	if c.DBWriteRetries == 0 {
