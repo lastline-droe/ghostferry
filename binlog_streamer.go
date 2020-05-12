@@ -135,6 +135,7 @@ func (s *BinlogStreamer) ConnectBinlogStreamerToMysql() (BinlogPosition, error) 
 		return BinlogPosition{}, err
 	}
 
+	s.logger.Debugf("connecting to binlog streamer using master state %s", currentPosition)
 	return s.ConnectBinlogStreamerToMysqlFrom(NewResumableBinlogPosition(currentPosition))
 }
 
