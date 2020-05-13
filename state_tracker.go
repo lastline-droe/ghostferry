@@ -147,13 +147,16 @@ func NewStateTrackerFromTargetDB(f *Ferry) (s *StateTracker, state *Serializable
 	if err == nil && state == nil {
 		err = s.initializeDBStateSchema(f.TargetDB, f.Config.ResumeStateFromDB)
 
+		s.logger.Debug("initializing resume state from binlog position on source DB")
 		masterPos, posErr := ShowMasterStatusBinlogPosition(f.SourceDB)
 		if posErr != nil {
 			s.logger.WithError(posErr).Error("failed to read current binlog position")
 			err = posErr
 			return
 		}
+
 		pos := NewResumableBinlogPosition(masterPos)
+		s.logger.Debugf("using resume state from binlog position on source DB: %s", pos)
 		s.UpdateLastWrittenBinlogPosition(pos)
 		s.UpdateLastStoredBinlogPositionForInlineVerifier(pos)
 		// we absolutely need to initialize the DB with a proper state of the source
@@ -615,6 +618,7 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 			return nil, err
 		}
 		f.logger.Infof("found binlog writer resume position data on target DB: %s", state.LastWrittenBinlogPosition)
+		s.UpdateLastWrittenBinlogPosition(state.LastWrittenBinlogPosition)
 	}
 
 	inlineVerifierTableName := s.getInlineVerifierStateTable()
@@ -643,7 +647,8 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 			}).Errorf("parsing inline-verifier resume position data row from target DB failed")
 			return nil, err
 		}
-		f.logger.Infof("found inline-verifier resume position data on target DB: %s", state.LastWrittenBinlogPosition)
+		f.logger.Infof("found inline-verifier resume position data on target DB: %s", state.LastStoredBinlogPositionForInlineVerifier)
+		s.UpdateLastStoredBinlogPositionForInlineVerifier(state.LastStoredBinlogPositionForInlineVerifier)
 	}
 
 	return state, nil
