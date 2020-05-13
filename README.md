@@ -110,9 +110,11 @@ Features/fixes added in this fork include
       Enabling inline/iterative verifiers causes an error at runtime if data
       is requested to be verified for an incompatible table.
     - because we support signed integer primary keys now, the maximum key value
-      supported is now 2**63 (previously 2**64). In practice it is unlikely to
-      have DB key values of this size, and it is thus not configurable to
-      provide the legacy behavior.
+      supported is now 2<sup>63</sup> (previously 2<sup>64</sup>). In practice
+      it is unlikely to have DB key values of this size, and it is thus not
+      configurable to provide the legacy behavior.
+- more robust [disabling of inline-verifier](https://github.com/Shopify/ghostferry/issues/184):
+  this fix has not made it into upstream master yet.
 
 Overview of How it Works
 ------------------------
