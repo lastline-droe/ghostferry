@@ -227,7 +227,10 @@ func (b *BinlogWriter) handleRowsEvent(ev *ReplicationEvent, rowsEvent *replicat
 func (b *BinlogWriter) handleQueryEvent(ev *ReplicationEvent, queryEvent *replication.QueryEvent) ([]DXLEventWrapper, error) {
 	schemaEvents, err := b.queryAnalyzer.ParseSchemaChanges(string(queryEvent.Query), string(queryEvent.Schema))
 	if err != nil {
-		return nil, err
+		if IncrediblyVerboseLogging {
+			b.logger.Warnf("parsing query event failed (%s): %s", err, string(queryEvent.Query))
+		}
+		return nil, fmt.Errorf("parsing query event failed: %s", err)
 	}
 
 	events := make([]DXLEventWrapper, 0)
@@ -307,7 +310,7 @@ func (b *BinlogWriter) handleQueryEvent(ev *ReplicationEvent, queryEvent *replic
 
 func (b *BinlogWriter) handleReplicationEvent(ev *ReplicationEvent) ([]DXLEventWrapper, error) {
 	if IncrediblyVerboseLogging {
-		b.logger.Debugf("Handling replication event: %v", ev)
+		b.logger.Debugf("Handling %T replication event: %v", ev.BinlogEvent.Event, ev)
 	}
 	switch event := ev.BinlogEvent.Event.(type) {
 	case *replication.RowsEvent:

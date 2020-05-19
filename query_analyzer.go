@@ -2,6 +2,7 @@ package ghostferry
 
 import (
 	_ "github.com/pingcap/tidb/types/parser_driver" // needed for running the parser
+	"strings"
 
 	"github.com/pingcap/parser"
 	"github.com/pingcap/parser/ast"
@@ -53,12 +54,25 @@ func (q *QueryAnalyzer) ParseSchemaChanges(sqlStatement string, schemaOfStatemen
 	//
 	// will create a table called "mytable" in a DB called "mydb". Thus, we need
 	// to parse the statement fully to understand what is happening
-	stmts, _, err := q.sqlParser.Parse(string(sqlStatement), "", "")
+	stmts, _, err := q.sqlParser.Parse(sqlStatement, "", "")
+
+	schemaEvents := make([]*SchemaEvent, 0)
 	if err != nil {
+		// XXX: The parser may fail for valid SQL:
+		//
+		// https://github.com/pingcap/parser/issues/857
+		//
+		// We really need to extend the parser, but we don't have the cycles
+		// right now, so we hack "support" in here - as we ignore these GRANTs
+		// anyways
+		tokens := strings.SplitN(strings.TrimSpace(sqlStatement), " ", 2)
+		if len(tokens) == 2 && strings.ToUpper(tokens[0]) == "GRANT" {
+			return schemaEvents, nil
+		}
+
 		return nil, err
 	}
 
-	schemaEvents := make([]*SchemaEvent, 0)
 	for _, stmt := range stmts {
 		switch t := stmt.(type) {
 		case *ast.RenameTableStmt:
