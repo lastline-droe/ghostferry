@@ -135,7 +135,8 @@ func (r *ShardingFerry) Run() {
 		r.Ferry.ErrorHandler.Fatal("sharding", err)
 	}
 
-	r.Ferry.Throttler.SetDisabled(true)
+	r.Ferry.MigrationThrottler.SetDisabled(true)
+	r.Ferry.ReplicationThrottler.SetDisabled(true)
 
 	r.Ferry.FlushBinlogAndStopStreaming()
 	copyWG.Wait()
@@ -172,7 +173,8 @@ func (r *ShardingFerry) Run() {
 		r.Ferry.ErrorHandler.Fatal("sharding", err)
 	}
 
-	r.Ferry.Throttler.SetDisabled(false)
+	r.Ferry.MigrationThrottler.SetDisabled(false)
+	r.Ferry.ReplicationThrottler.SetDisabled(false)
 
 	metrics.Measure("CutoverUnlock", nil, 1.0, func() {
 		err = r.config.CutoverUnlock.Post(&client)
