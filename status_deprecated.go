@@ -39,7 +39,10 @@ type StatusDeprecated struct {
 	LastSuccessfulBinlogPos     mysql.Position
 	TargetBinlogPos             mysql.Position
 
+	// for backwards compatibility, a union of the detailed stats below
 	Throttled bool
+	MigrationThrottled bool
+	ReplicationThrottled bool
 
 	CompletedTableCount int
 	TotalTableCount     int
@@ -93,7 +96,9 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 	status.LastSuccessfulBinlogPos = f.BinlogStreamer.GetLastStreamedBinlogPosition()
 	status.TargetBinlogPos = f.BinlogStreamer.targetBinlogPosition
 
-	status.Throttled = f.Throttler.Throttled()
+	status.MigrationThrottled = f.MigrationThrottler.Throttled()
+	status.ReplicationThrottled = f.ReplicationThrottler.Throttled()
+	status.Throttled = status.MigrationThrottled || status.ReplicationThrottled
 
 	// Getting all table statuses
 	status.TableStatuses = make([]*TableStatusDeprecated, 0, len(f.Tables))
