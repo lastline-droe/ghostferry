@@ -56,8 +56,9 @@ func NewFerry(config *Config) (*ShardingFerry, error) {
 	}
 
 	ferry := &ghostferry.Ferry{
-		Config:    config.Config,
-		Throttler: throttler,
+		Config:               config.Config,
+		MigrationThrottler:   throttler,
+		ReplicationThrottler: throttler,
 	}
 
 	logger := logrus.WithField("tag", "sharding")
@@ -107,7 +108,8 @@ func (r *ShardingFerry) Run() {
 
 	r.Ferry.WaitUntilRowCopyIsComplete()
 
-	ghostferry.WaitForThrottle(r.Ferry.Throttler)
+	ghostferry.WaitForThrottle(r.Ferry.MigrationThrottler)
+	ghostferry.WaitForThrottle(r.Ferry.ReplicationThrottler)
 
 	r.Ferry.WaitUntilBinlogStreamerCatchesUp()
 

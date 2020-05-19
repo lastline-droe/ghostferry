@@ -28,7 +28,7 @@ func (this *DataIteratorTestSuite) SetupTest() {
 	sourceDb := this.Ferry.SourceDB
 	config := this.Ferry.Config
 	errorHandler := this.Ferry.ErrorHandler
-	throttler := this.Ferry.Throttler
+	throttler := this.Ferry.MigrationThrottler
 
 	tableFilter := &testhelpers.TestTableFilter{
 		DbsFunc:    testhelpers.DbApplicabilityFilter([]string{testhelpers.TestSchemaName}),

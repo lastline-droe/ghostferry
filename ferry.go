@@ -68,7 +68,8 @@ type Ferry struct {
 
 	StateTracker                       *StateTracker
 	ErrorHandler                       ErrorHandler
-	Throttler                          Throttler
+	MigrationThrottler                 Throttler
+	ReplicationThrottler               Throttler
 	WaitUntilReplicaIsCaughtUpToMaster *WaitUntilReplicaIsCaughtUpToMaster
 
 	// This can be specified by the caller. If specified, do not specify
@@ -128,7 +129,7 @@ func (f *Ferry) NewBinlogWriter() *BinlogWriter {
 		DB:               f.TargetDB,
 		DatabaseRewrites: f.Config.DatabaseRewrites,
 		TableRewrites:    f.Config.TableRewrites,
-		Throttler:        f.Throttler,
+		Throttler:        f.ReplicationThrottler,
 
 		BatchSize:          f.Config.BinlogEventBatchSize,
 		WriteRetries:       f.Config.DBWriteRetries,
@@ -403,8 +404,12 @@ func (f *Ferry) Initialize() (err error) {
 		}
 	}
 
-	if f.Throttler == nil {
-		f.Throttler = &PauserThrottler{}
+	if f.MigrationThrottler == nil {
+		f.MigrationThrottler = &PauserThrottler{}
+	}
+
+	if f.ReplicationThrottler == nil {
+		f.ReplicationThrottler = &PauserThrottler{}
 	}
 
 	// Loads the schema of the tables that are applicable.
@@ -551,11 +556,23 @@ func (f *Ferry) Run() {
 	}
 
 	supportingServicesWg := &sync.WaitGroup{}
-	supportingServicesWg.Add(1)
+
+	// it's possible to use just one throttler - if they map to the same
+	// instance, don't "run" them twice
+	if f.MigrationThrottler == f.ReplicationThrottler {
+		supportingServicesWg.Add(1)
+	} else {
+		supportingServicesWg.Add(2)
+
+		go func() {
+			defer supportingServicesWg.Done()
+			handleError("replication-throttler", f.ReplicationThrottler.Run(ctx))
+		}()
+	}
 
 	go func() {
 		defer supportingServicesWg.Done()
-		handleError("throttler", f.Throttler.Run(ctx))
+		handleError("migration-throttler", f.MigrationThrottler.Run(ctx))
 	}()
 
 	if f.Config.ProgressCallback.URI != "" {
@@ -778,7 +795,7 @@ func (f *Ferry) Progress() *Progress {
 		VerifierType:  f.VerifierType,
 	}
 
-	s.Throttled = f.Throttler.Throttled()
+	s.Throttled = f.MigrationThrottler.Throttled() || f.ReplicationThrottler.Throttled()
 
 	// Binlog Progress
 	s.LastSuccessfulBinlogPos = f.BinlogStreamer.GetLastStreamedBinlogPosition()

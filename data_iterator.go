@@ -34,7 +34,7 @@ func NewDataIterator(f *Ferry) *DataIterator {
 		ErrorHandler: f.ErrorHandler,
 		CursorConfig: &CursorConfig{
 			DB:        f.SourceDB,
-			Throttler: f.Throttler,
+			Throttler: f.MigrationThrottler,
 
 			BatchSize:   f.Config.DataIterationBatchSize,
 			ReadRetries: f.Config.DBReadRetries,

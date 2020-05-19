@@ -29,8 +29,8 @@ func (this *ControlServer) Initialize() (err error) {
 
 	this.router = mux.NewRouter()
 	this.router.HandleFunc("/", this.HandleIndex).Methods("GET")
-	this.router.HandleFunc("/api/actions/pause", this.HandlePause).Methods("POST")
-	this.router.HandleFunc("/api/actions/unpause", this.HandleUnpause).Methods("POST")
+	this.router.HandleFunc("/api/actions/pause", this.HandlePause).Queries("type", "{type:migration|replication}").Methods("POST")
+	this.router.HandleFunc("/api/actions/unpause", this.HandleUnpause).Queries("type", "{type:migration|replication}").Methods("POST")
 	this.router.HandleFunc("/api/actions/cutover", this.HandleCutover).Queries("type", "{type:automatic|manual}").Methods("POST")
 	this.router.HandleFunc("/api/actions/stop", this.HandleStop).Methods("POST")
 	this.router.HandleFunc("/api/actions/verify", this.HandleVerify).Methods("POST")
@@ -91,15 +91,46 @@ func (this *ControlServer) HandleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (this *ControlServer) HandlePause(w http.ResponseWriter, r *http.Request) {
-	this.F.Throttler.SetPaused(true)
+func (this *ControlServer) getThrottlerForRequest(w http.ResponseWriter, r *http.Request) Throttler {
+	vars := mux.Vars(r)
+	throttlerName := vars["type"]
 
+	logger := this.logger.WithFields(logrus.Fields{
+		"method":    r.Method,
+		"path":      r.RequestURI,
+		"throttler": throttlerName,
+	})
+	logger.Info("received http request for throttler")
+
+	if throttlerName == "migration" {
+		return this.F.MigrationThrottler
+	} else if throttlerName == "replication" {
+		return this.F.ReplicationThrottler
+	} else {
+		logger.Warning("received http request for unknown throttler")
+		return nil
+	}
+}
+
+func (this *ControlServer) HandlePause(w http.ResponseWriter, r *http.Request) {
+	throttler := this.getThrottlerForRequest(w, r)
+	if throttler == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	throttler.SetPaused(true)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 func (this *ControlServer) HandleUnpause(w http.ResponseWriter, r *http.Request) {
-	this.F.Throttler.SetPaused(false)
+	throttler := this.getThrottlerForRequest(w, r)
+	if throttler == nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 
+	throttler.SetPaused(false)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

@@ -115,6 +115,8 @@ Features/fixes added in this fork include
       configurable to provide the legacy behavior.
 - more robust [disabling of inline-verifier](https://github.com/Shopify/ghostferry/issues/184):
   this fix has not made it into upstream master yet.
+- support throttling of data migration separately from replication. This allows
+  prioritizing the data replication over the copy of old data (or vice-versa).
 
 Overview of How it Works
 ------------------------
