@@ -189,7 +189,10 @@ func (s *StateTracker) UpdateLastSuccessfulPaginationKey(table string, paginatio
 	s.CopyRWMutex.Lock()
 	defer s.CopyRWMutex.Unlock()
 
-	s.logger.WithField("table", table).Debugf("updating table last successful pagination key: %s", paginationKey)
+	s.logger.WithField("table", table).Debugf("updating table last successful pagination key")
+	if IncrediblyVerboseLogging {
+		s.logger.WithField("table", table).Debugf("updating table last successful pagination key: %s", paginationKey)
+	}
 
 	var deltaPaginationKey uint64
 	if s.lastSuccessfulPaginationKeys[table] != nil {
@@ -507,25 +510,9 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 
 	s.logger.Infof("reading resume data from target database")
 
-	var tables TableSchemaCache
-	// NOTE: Here we read the state from the *target* DB (rather than the source
-	// DB). This is because the target is in the schema in which we can apply
-	// DML.
-	// If we are still in the copy phase, the schemas must be in sync, because
-	// DDL statements are delayed in the binlog writer until the copy is done.
-	// If we are already in the binlog writing phase, then the target DB is in
-	// sync with the binlog position - that is, any schema differences between
-	// source and target are still in the binlogs yet to be applied.
-	metrics.Measure("LoadTables", nil, 1.0, func() {
-		tables, err = LoadTables(f.TargetDB, f.TableFilter, f.CompressedColumnsForVerification, f.IgnoredColumnsForVerification, f.CascadingPaginationColumnConfig)
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	state := &SerializableState{
 		GhostferryVersion:            VersionString,
-		LastKnownTableSchemaCache:    tables,
+		LastKnownTableSchemaCache:    f.Tables,
 		LastSuccessfulPaginationKeys: make(map[string]*PaginationKeyData),
 		CompletedTables:              make(map[string]bool),
 	}
@@ -572,7 +559,7 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 				return nil, err
 			}
 
-			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, tables[tableName])
+			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, f.Tables[tableName])
 			if err != nil {
 				s.logger.WithFields(logrus.Fields{
 					"err":   err,

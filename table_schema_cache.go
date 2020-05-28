@@ -44,11 +44,6 @@ type PaginationKey struct {
 	// Used only for estimating the position of a particular value within the
 	// range of the pagination
 	MostSignificantColumnIndex int
-
-	// If true, the table should be traversed in descending order. This means
-	// that we allow copying more recent data first (if the key refers to
-	// chronological order of entries)
-	PaginateInAscendingOrder bool
 }
 
 func (k PaginationKey) String() string {
@@ -382,7 +377,6 @@ func (t *TableSchema) paginationKey(cascadingPaginationColumnConfig *CascadingPa
 	paginationKey := &PaginationKey{
 		Columns: paginationKeyColumns,
 		ColumnIndices: paginationKeyColumnIndices,
-		PaginateInAscendingOrder: false,
 	}
 	return paginationKey, err
 }
