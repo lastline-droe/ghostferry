@@ -546,33 +546,34 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 			return nil, err
 		}
 
+		logger := s.logger.WithField("table", tableName)
+		// having the data that we tried to parse is incredibly useful
+		// for debugging, but the data should be considered
+		// confidential, so we cannot emit it to logs by default, even
+		// in debug-mode
+		if IncrediblyVerboseLogging {
+			logger = logger.WithField("data", lastPaginationKey)
+		}
+
+		var table *TableSchema
+		var ok bool
+		if table, ok = f.Tables[tableName]; !ok {
+			logger.Warningf("row-copy resume data contains state for unknown table")
+			continue
+		}
+
 		// non-paginated tables don't have resume key data
 		if lastPaginationKey != "" {
 			var lastPaginationKeyData PaginationKeyData
 			err = json.NewDecoder(strings.NewReader(lastPaginationKey)).Decode(&lastPaginationKeyData)
 			if err != nil {
-				s.logger.WithFields(logrus.Fields{
-					"err":   err,
-					"table": tableName,
-					"data":  lastPaginationKey,
-				}).Errorf("parsing row-copy resume key from target DB failed")
+				logger.WithField("err", err).Errorf("parsing row-copy resume key from target DB failed")
 				return nil, err
 			}
 
-			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, f.Tables[tableName])
+			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, table)
 			if err != nil {
-				logger := s.logger.WithFields(logrus.Fields{
-					"err":   err,
-					"table": tableName,
-				})
-				// having the data that we tried to parse is incredibly useful
-				// for debugging, but the data should be considered
-				// confidential, so we cannot emit it to logs by default, even
-				// in debug-mode
-				if IncrediblyVerboseLogging {
-					logger = logger.WithField("data", lastPaginationKey)
-				}
-				logger.Errorf("unmarshalling row-copy resume key from target DB failed")
+				logger.WithField("err", err).Errorf("unmarshalling row-copy resume key from target DB failed")
 				return nil, err
 			}
 

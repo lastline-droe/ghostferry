@@ -122,6 +122,54 @@ func (s *StateTrackerTestSuite) TestSerializeStateInTargetDB() {
 	s.Require().Equal(state2.LastWrittenBinlogPosition, state3.LastWrittenBinlogPosition)
 }
 
+func (s *StateTrackerTestSuite) TestReadStateFromTargetDBContainingUnknownTable() {
+	testFerry := s.TestFerry.Ferry
+	testFerry.ResumeStateFromDB = StateSchemaName
+
+	// initialize the state
+	_, _, err := ghostferry.NewStateTrackerFromTargetDB(testFerry)
+	s.Require().Nil(err)
+
+	// corrupt the state by adding an unknown table
+	//
+	// NOTE: If we don't correctly ignore the unknown table, we should crash
+	// due to the key data not being valid JSON
+	query := fmt.Sprintf("INSERT INTO %s.`_ghostferry_91919__row_copy_state` (table_name, last_pagination_key) VALUES ('%s.unknown_table', 'not json')", StateSchemaName, StateSchemaName)
+	_, err = testFerry.TargetDB.Exec(query)
+	testhelpers.PanicIfError(err)
+
+	// make sure loading still works
+	stateTracker, _, err := ghostferry.NewStateTrackerFromTargetDB(testFerry)
+	s.Require().Nil(err)
+	s.Require().NotNil(stateTracker)
+}
+
+func (s *StateTrackerTestSuite) TestReadStateFromTargetDBContainingCorruptedKeyData() {
+	testFerry := s.TestFerry.Ferry
+	testFerry.ResumeStateFromDB = StateSchemaName
+
+	s.SeedSourceDB(0)
+	tableFilter := &testhelpers.TestTableFilter{
+		DbsFunc:    testhelpers.DbApplicabilityFilter([]string{testhelpers.TestSchemaName}),
+		TablesFunc: nil,
+	}
+	testFerry.Tables, _ = ghostferry.LoadTables(testFerry.SourceDB, tableFilter, nil, nil, nil)
+
+	// initialize the state
+	_, _, err := ghostferry.NewStateTrackerFromTargetDB(testFerry)
+	s.Require().Nil(err)
+
+	// corrupt the state in a way that loading should raise an error
+	query := fmt.Sprintf("INSERT INTO %s.`_ghostferry_91919__row_copy_state` (table_name, last_pagination_key) VALUES ('%s.%s', 'not json')", StateSchemaName, testhelpers.TestSchemaName, testhelpers.TestTable1Name)
+	_, err = testFerry.TargetDB.Exec(query)
+	testhelpers.PanicIfError(err)
+
+	// make sure loading still works
+	_, _, err = ghostferry.NewStateTrackerFromTargetDB(testFerry)
+	s.Require().NotNil(err)
+	s.Require().EqualError(err, fmt.Sprintf("invalid character 'o' in literal null (expecting 'u')"))
+}
+
 func TestStateTrackerTestSuite(t *testing.T) {
 	testhelpers.SetupTest()
 	suite.Run(t, &StateTrackerTestSuite{GhostferryUnitTestSuite: &testhelpers.GhostferryUnitTestSuite{}})
