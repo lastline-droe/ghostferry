@@ -544,9 +544,13 @@ func showTablesFrom(c *sql.DB, dbname string) ([]string, error) {
 
 func targetPaginationKey(db *sql.DB, table *TableSchema, iterateInDescendingOrder bool) (*PaginationKeyData, bool, error) {
 	columnsToSelect := []string{"*"}
-	query, args, err := DefaultBuildSelect(columnsToSelect, table, nil, 1, !iterateInDescendingOrder).
-		ToSql()
 
+	selectBuilder, err := DefaultBuildSelect(columnsToSelect, table, nil, 1, !iterateInDescendingOrder)
+	if err != nil {
+		return nil, false, err
+	}
+
+	query, args, err := selectBuilder.ToSql()
 	if err != nil {
 		return nil, false, err
 	}

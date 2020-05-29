@@ -574,11 +574,18 @@ func (s *StateTracker) readStateFromDB(f *Ferry) (*SerializableState, error) {
 
 			keyData, err := UnmarshalPaginationKeyData(&lastPaginationKeyData, tables[tableName])
 			if err != nil {
-				s.logger.WithFields(logrus.Fields{
+				logger := s.logger.WithFields(logrus.Fields{
 					"err":   err,
 					"table": tableName,
-					"data":  lastPaginationKey,
-				}).Errorf("unmarshalling row-copy resume key from target DB failed")
+				})
+				// having the data that we tried to parse is incredibly useful
+				// for debugging, but the data should be considered
+				// confidential, so we cannot emit it to logs by default, even
+				// in debug-mode
+				if IncrediblyVerboseLogging {
+					logger = logger.WithField("data", lastPaginationKey)
+				}
+				logger.Errorf("unmarshalling row-copy resume key from target DB failed")
 				return nil, err
 			}
 
