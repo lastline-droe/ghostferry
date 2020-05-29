@@ -43,7 +43,7 @@ func (t *CopyFilterTestSuite) SetupTest() {
 				{Name: "unrelated_index2", Columns: []string{"data"}},
 			},
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 	t.paginationKeyCursor, _ = ghostferry.NewPaginationKeyDataFromRow(ghostferry.RowData{t.paginationKeyCursorValue}, t.normalTable.PaginationKey)
 
@@ -55,7 +55,7 @@ func (t *CopyFilterTestSuite) SetupTest() {
 			Columns:   columns,
 			PKColumns: []int{0},
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 
 	columns = []schema.TableColumn{{Name: "tenant_id", Type: schema.TYPE_NUMBER}}
@@ -66,7 +66,7 @@ func (t *CopyFilterTestSuite) SetupTest() {
 			Columns:   columns,
 			PKColumns: []int{0},
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 
 	t.filter = &sharding.ShardedCopyFilter{
