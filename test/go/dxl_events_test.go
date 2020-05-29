@@ -37,7 +37,7 @@ func (this *DMLEventsTestSuite) SetupTest() {
 			Name:    "test_table",
 			Columns: columns,
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 
 	this.targetTable = &ghostferry.TableSchema{
@@ -46,7 +46,7 @@ func (this *DMLEventsTestSuite) SetupTest() {
 			Name:    "target_table",
 			Columns: columns,
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 
 	this.tableSchemaCache = map[string]*ghostferry.TableSchema{

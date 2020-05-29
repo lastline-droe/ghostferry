@@ -422,6 +422,7 @@ func (f *Ferry) Initialize() (err error) {
 	// we'll regenerate it from the source database, assuming it has not been
 	// changed.
 	if f.StateToResumeFrom == nil || f.StateToResumeFrom.LastKnownTableSchemaCache == nil {
+		f.logger.Debug("loading table schema from source DB")
 		metrics.Measure("LoadTables", nil, 1.0, func() {
 			f.Tables, err = LoadTables(f.SourceDB, f.TableFilter, f.CompressedColumnsForVerification, f.IgnoredColumnsForVerification, f.CascadingPaginationColumnConfig)
 		})

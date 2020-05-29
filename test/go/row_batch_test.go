@@ -36,7 +36,7 @@ func (this *RowBatchTestSuite) SetupTest() {
 			Name:    "test_table",
 			Columns: columns,
 		},
-		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0, false},
+		PaginationKey: &ghostferry.PaginationKey{[]*schema.TableColumn{&columns[0]}, []int{0}, 0},
 	}
 
 	this.targetTable = &ghostferry.TableSchema{
