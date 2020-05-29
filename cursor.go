@@ -86,6 +86,9 @@ func NewPaginationKeyDataFromRow(row RowData, paginationKey *PaginationKey) (pag
 func UnmarshalPaginationKeyData(keyData *PaginationKeyData, table *TableSchema) (paginationKeyData *PaginationKeyData, err error) {
 	// build a dummy row of the original table, filled in with the pagination
 	// key data, which we then import using the regular method above
+	if len(keyData.Values) != len(table.PaginationKey.ColumnIndices) {
+		return nil, fmt.Errorf("unmarshalling invalid values for %s on table %s: expecting %d values, got %d", table.PaginationKey, table, len(table.PaginationKey.ColumnIndices), len(keyData.Values))
+	}
 	row := make(RowData, len(table.Columns))
 	for i, columnIndex := range table.PaginationKey.ColumnIndices {
 		value := keyData.Values[i]
@@ -336,12 +339,12 @@ func (c *PaginatedCursor) Fetch(db SqlPreparer) (batch InsertRowBatch, paginatio
 
 	if c.BuildSelect != nil {
 		selectBuilder, err = c.BuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, c.IterateInDescendingOrder)
-		if err != nil {
-			c.logger.WithError(err).Error("failed to apply filter for select")
-			return
-		}
 	} else {
-		selectBuilder = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, c.IterateInDescendingOrder)
+		selectBuilder, err = DefaultBuildSelect(c.ColumnsToSelect, c.Table, c.lastSuccessfulPaginationKey, c.BatchSize, c.IterateInDescendingOrder)
+	}
+	if err != nil {
+		c.logger.WithError(err).Error("failed to apply filter for select")
+		return
 	}
 
 	if c.RowLock {
@@ -640,9 +643,8 @@ func ScanByteRow(rows *sqlorig.Rows, columnCount int) ([][]byte, error) {
 	return values, err
 }
 
-func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey *PaginationKeyData, batchSize uint64, sortDescending bool) squirrel.SelectBuilder {
-	stmt := squirrel.Select(columns...).
-		From(QuotedTableName(table))
+func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey *PaginationKeyData, batchSize uint64, sortDescending bool) (squirrel.SelectBuilder, error) {
+	stmt := squirrel.Select(columns...).From(QuotedTableName(table))
 
 	// selecting a resume position in the context of composite primary keys is
 	// not entirely trivial: consider a composite key of A+B and the following
@@ -681,6 +683,10 @@ func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey 
 	//
 	// to allow proper resuming
 	if lastPaginationKey != nil {
+		if len(lastPaginationKey.Values) != len(lastPaginationKey.paginationKey.ColumnIndices) {
+			return stmt, fmt.Errorf("building select with invalid values for %s on table %s: expecting %d values, got %d", table.PaginationKey, table, len(lastPaginationKey.paginationKey.ColumnIndices), len(lastPaginationKey.Values))
+		}
+
 		// unfortunately squirrel does not allow to build structures very
 		// nicely, so we have to build an actual prepared SQL statement
 		whereSql := ""
@@ -728,7 +734,5 @@ func DefaultBuildSelect(columns []string, table *TableSchema, lastPaginationKey 
 		}
 	}
 
-	return stmt.
-		Limit(batchSize).
-		OrderBy(orderBy...)
+	return stmt.Limit(batchSize).OrderBy(orderBy...), nil
 }

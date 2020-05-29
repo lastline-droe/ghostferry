@@ -1,7 +1,10 @@
 package test
 
 import (
+	"encoding/json"
+	"fmt"
 	"github.com/siddontang/go-mysql/schema"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -41,7 +44,8 @@ func (this *SimplePaginationKeyTestSuite) SetupTest() {
 }
 
 func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelect() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1` LIMIT 5")
@@ -49,7 +53,8 @@ func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelect() {
 }
 
 func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelectDescending() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1` DESC LIMIT 5")
@@ -60,7 +65,8 @@ func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeData()
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`>? ORDER BY `col1` LIMIT 5")
@@ -71,7 +77,8 @@ func (this *SimplePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeDataDe
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`<? ORDER BY `col1` DESC LIMIT 5")
@@ -128,7 +135,8 @@ func (this *CompositePaginationKeyTestSuite) SetupTest() {
 }
 
 func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelect() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, false)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1`, `col2`, `col3` LIMIT 5")
@@ -136,7 +144,8 @@ func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelect() {
 }
 
 func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectDescending() {
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, nil, 5, true)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` ORDER BY `col1` DESC, `col2` DESC, `col3` DESC LIMIT 5")
@@ -147,7 +156,8 @@ func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeDat
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, false)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`>? OR `col1`=? AND `col2`>? OR `col1`=? AND `col2`=? AND `col3`>? ORDER BY `col1`, `col2`, `col3` LIMIT 5")
@@ -158,14 +168,27 @@ func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectWithResumeDat
 	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
-	builder := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
+	builder, err := ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
+	this.Require().Nil(err)
 	sql, args, err := builder.ToSql()
 	this.Require().Nil(err)
 	this.Require().Equal(sql, "SELECT * FROM `test_schema`.`test_table` WHERE `col1`<? OR `col1`=? AND `col2`<? OR `col1`=? AND `col2`=? AND `col3`<? ORDER BY `col1` DESC, `col2` DESC, `col3` DESC LIMIT 5")
 	this.Require().Equal(args, []interface{}{int64(1), int64(1), "one", int64(1), "one", int64(2)})
 }
 
-func (this *CompositePaginationKeyTestSuite) TestPaginationKeyDatacompare() {
+func (this *CompositePaginationKeyTestSuite) TestDefaultBuildSelectWithInvalidData() {
+	lastPaginationKeyData, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
+	this.Require().Nil(err)
+
+	// corrupt the key (e.g., as if the loaded resume state is invalid)
+	actualValues := lastPaginationKeyData.Values
+	lastPaginationKeyData.Values = make(ghostferry.RowData, len(lastPaginationKeyData.Values)-1)
+	_, err = ghostferry.DefaultBuildSelect(this.columnsToSelect, this.table, lastPaginationKeyData, 5, true)
+	this.Require().NotNil(err)
+	this.Require().EqualError(err, fmt.Sprintf("building select with invalid values for %s on table %s: expecting %d values, got %d", this.table.PaginationKey, this.table, len(actualValues), len(lastPaginationKeyData.Values)))
+}
+
+func (this *CompositePaginationKeyTestSuite) TestPaginationKeyDataCompare() {
 	data1, err := ghostferry.NewPaginationKeyDataFromRow(this.rows[0], this.table.PaginationKey)
 	this.Require().Nil(err)
 
@@ -180,6 +203,33 @@ func (this *CompositePaginationKeyTestSuite) TestPaginationKeyDatacompare() {
 	this.Require().Equal(data3.Compare(data3), 0)
 	this.Require().Equal(data3.Compare(data1), -1)
 	this.Require().Equal(data1.Compare(data3), 1)
+}
+
+func (this *CompositePaginationKeyTestSuite) TestUnmarshalling() {
+	var deserializedPaginationKeyData ghostferry.PaginationKeyData
+	stateToRead := "{\"Values\":[1,\"two\",3]}"
+
+	err := json.NewDecoder(strings.NewReader(stateToRead)).Decode(&deserializedPaginationKeyData)
+	this.Require().Nil(err)
+
+	paginationKeyData, err := ghostferry.UnmarshalPaginationKeyData(&deserializedPaginationKeyData, this.table)
+	this.Require().Nil(err)
+	this.Require().Equal(len(paginationKeyData.Values), 3)
+	this.Require().Equal(paginationKeyData.Values[0], int64(1))
+	this.Require().Equal(paginationKeyData.Values[1], "two")
+	this.Require().Equal(paginationKeyData.Values[2], int64(3))
+}
+
+func (this *CompositePaginationKeyTestSuite) TestUnmarshallingInvalidData() {
+	var deserializedPaginationKeyData ghostferry.PaginationKeyData
+	stateToRead := "{\"Values\":[1,\"two\"]}"
+
+	err := json.NewDecoder(strings.NewReader(stateToRead)).Decode(&deserializedPaginationKeyData)
+	this.Require().Nil(err)
+
+	_, err = ghostferry.UnmarshalPaginationKeyData(&deserializedPaginationKeyData, this.table)
+	this.Require().NotNil(err)
+	this.Require().EqualError(err, fmt.Sprintf("unmarshalling invalid values for %s on table %s: expecting 3 values, got 2", this.table.PaginationKey, this.table))
 }
 
 func TestCompositePaginationKey(t *testing.T) {
