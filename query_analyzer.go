@@ -58,6 +58,13 @@ func (q *QueryAnalyzer) ParseSchemaChanges(sqlStatement string, schemaOfStatemen
 
 	schemaEvents := make([]*SchemaEvent, 0)
 	if err != nil {
+		// NOTE: We do not log the statement (or even the error itself) by
+		// default, as it may contain confidential data
+		q.logger.Warnf("Parsing SQL statement failed")
+		if IncrediblyVerboseLogging {
+			q.logger.Debugf("Failing SQL statement: %s", sqlStatement)
+		}
+
 		// XXX: The parser may fail for valid SQL:
 		//
 		// https://github.com/pingcap/parser/issues/857
@@ -65,8 +72,17 @@ func (q *QueryAnalyzer) ParseSchemaChanges(sqlStatement string, schemaOfStatemen
 		// We really need to extend the parser, but we don't have the cycles
 		// right now, so we hack "support" in here - as we ignore these GRANTs
 		// anyways
-		tokens := strings.SplitN(strings.TrimSpace(sqlStatement), " ", 2)
-		if len(tokens) == 2 && strings.ToUpper(tokens[0]) == "GRANT" {
+		// Same is true for PROCEDURE CREATion. This one is not as easy as
+		// grants, as we *do* care about them (they are part of the schema),
+		// but same reasoning: marking this as not supported
+		tokens := strings.SplitN(strings.TrimSpace(sqlStatement), " ", 4)
+		if len(tokens) >= 2 && strings.ToUpper(tokens[0]) == "GRANT" {
+			return schemaEvents, nil
+		}
+		if len(tokens) >= 3 && strings.ToUpper(tokens[0]) == "CREATE" && (
+				strings.ToUpper(tokens[1]) == "PROCEDURE" || strings.ToUpper(tokens[1]) == "FUNCTION" ||
+				// SQL allows an optional "DEFINER=" statement
+				strings.ToUpper(tokens[2]) == "PROCEDURE" || strings.ToUpper(tokens[2]) == "FUNCTION") {
 			return schemaEvents, nil
 		}
 
