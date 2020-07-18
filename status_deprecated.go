@@ -59,7 +59,9 @@ type StatusDeprecated struct {
 }
 
 func getPaginationColumnName(table *TableSchema) (paginationKeyName string) {
-	if table.PaginationKey == nil {
+	if table == nil {
+		paginationKeyName = "n/a (unknown table)"
+	} else if table.PaginationKey == nil {
 		paginationKeyName = "not paginated"
 	} else {
 		for i, column := range table.PaginationKey.Columns {
