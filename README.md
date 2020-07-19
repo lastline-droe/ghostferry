@@ -79,7 +79,7 @@ Features/fixes added in this fork include
   propagates such events from the source to the target database.  
   Note that there are a few restrictions/limitations with this:
     - schema changes occurring during the *copy phase* cannot be handled if the
-      columns of an copy-in-progress table change. There are work-arounds in
+      columns of a copy-in-progress table change. There are work-arounds in
       place to recover the copy process after a restart though (see
       `DelayDataIterationUntilBinlogWriterShutdown` and
       `FailOnFirstTableCopyError`).
@@ -91,6 +91,12 @@ Features/fixes added in this fork include
     - database/table name rewrites are not supported, as we would need non-
       trivial rewrites of schema changing statements when tables are altered,
       renamed, created, or deleted.
+    - `GRANT` statements are ignored. These are not part of the schema per-se,
+      but it is still worth pointing out.
+    - `CREATE PROCEDURE` and `CREATE FUNCTION` statements are currently not
+      supported and are ignored as part of replication. Likewise, functions
+      or procedures defined on the source before replication is started are
+      not copied to the target DB.
 - support [reading from (read-only) DB replica](https://github.com/Lastline-Inc/ghostferry/issues/22):
   allow using locks within `Ghostferry` (instead of on the source database) to
   avoid race conditions between the data copy and binlog replication. The

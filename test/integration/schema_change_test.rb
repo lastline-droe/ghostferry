@@ -234,6 +234,36 @@ class SchemaChangeIntegrationTests < GhostferryTestCase
     assert_equal 7, res.first["data2"]
   end
 
+  def test_skip_unsupported_statements
+    # this is really an anti-test, in that we check if do not properly propagate schema changes. The
+    # idea is that we want to _survive_ some unsupported statements that we agree are outside of the
+    # scope that we support
+    [source_db, target_db].each do |db|
+      db.query("CREATE DATABASE IF NOT EXISTS #{DEFAULT_DB}")
+    end
+
+    ghostferry = new_altering_ghostferry
+
+    # delay creation until now to ensure the binlog writer gets it (that is, it's not already part
+    # of the schema by the time it starts up)
+    ghostferry.on_status(Ghostferry::Status::BINLOG_STREAMING_STARTED) do
+      source_db.query("USE #{DEFAULT_DB}")
+      # unsupported 1a: CREATE PROCEDURE (not implemented in the parser at all)
+      source_db.query("CREATE PROCEDURE test1(OUT result INT) BEGIN SELECT 1 INTO result; END")
+      # unsupported 1b: CREATE PROCEDURE (using a schema name as prefix)
+      source_db.query("CREATE PROCEDURE #{DEFAULT_DB}.test2(OUT result INT) BEGIN SELECT 1 INTO result; END")
+      # unsupported 2: GRANT USAGE with metadata
+      #source_db.query("GRANT USAGE ON #{DEFAULT_FULL_TABLE_NAME} TO 'root'@'%' WITH MAX_USER_CONNECTIONS 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_QUERIES_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0")
+      # eventually, create a DB to be able to check if we survived schema replication
+      source_db.query("CREATE TABLE #{DEFAULT_FULL_TABLE_NAME} (id bigint(20) not null, primary key(id))")
+    end
+
+    ghostferry.run
+
+    res = target_db.query("SHOW TABLES IN #{DEFAULT_DB}")
+    assert_equal 1, res.count
+  end
+
   private
 
   def new_altering_ghostferry(config_override: {})
