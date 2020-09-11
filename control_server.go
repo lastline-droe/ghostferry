@@ -1,9 +1,13 @@
 package ghostferry
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
 	"html/template"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,6 +38,7 @@ func (this *ControlServer) Initialize() (err error) {
 	this.router.HandleFunc("/api/actions/cutover", this.HandleCutover).Queries("type", "{type:automatic|manual}").Methods("POST")
 	this.router.HandleFunc("/api/actions/stop", this.HandleStop).Methods("POST")
 	this.router.HandleFunc("/api/actions/verify", this.HandleVerify).Methods("POST")
+	this.router.HandleFunc("/api/health", this.HandleStatusHealthCheck).Methods("GET")
 
 	if WebUiBasedir != "" {
 		this.Basedir = WebUiBasedir
@@ -166,4 +171,41 @@ func (this *ControlServer) HandleVerify(w http.ResponseWriter, r *http.Request) 
 	}
 
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+func (this *ControlServer) HandleStatusHealthCheck(w http.ResponseWriter, r *http.Request) {
+	status := FetchStatusDeprecated(this.F, this.Verifier)
+
+	// we allow the caller to specify conditions for which we return an HTTP-500 instead of an
+	// HTTP-200, to allow built-in evaluation of the state. This is typically used by lifeness
+	// probes in kubernetes
+	reportAsError := false
+
+	BinlogWriterStateTsAgeMs := r.FormValue("BinlogWriterStateTsAgeMs")
+	if BinlogWriterStateTsAgeMs != "" {
+		max, err := strconv.ParseInt(BinlogWriterStateTsAgeMs, 10, 64)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Invalid BinlogWriterStateTsAgeMs: %s", err.Error()), http.StatusBadRequest)
+			return
+		}
+		// time.Duration is signed, so we make "max" signed too - we have to check for 0 anyways
+		if max <= 0 {
+			http.Error(w, "Invalid BinlogWriterStateTsAgeMs: must be > 0", http.StatusBadRequest)
+			return
+		}
+		reportAsError = max > 0 && status.BinlogWriterStateTsAge.Milliseconds() > max
+	}
+
+	statusAsJson, err := json.Marshal(status)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if reportAsError {
+		http.Error(w, bytes.NewBuffer(statusAsJson).String(), http.StatusInternalServerError)
+	} else {
+		w.Write(statusAsJson)
+	}
 }

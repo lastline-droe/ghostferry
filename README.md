@@ -123,6 +123,11 @@ Features/fixes added in this fork include
   this fix has not made it into upstream master yet.
 - support throttling of data migration separately from replication. This allows
   prioritizing the data replication over the copy of old data (or vice-versa).
+- support exposing binlog writer state as part of the status portal as well as
+  a new `/api/health` HTTP endpoint returning status as JSON. This endpoint
+  can also be used for Kubernetes lifeness probes by specifying an allowed
+  maximum value for the state age, returning HTTP-500 if the maximum has been
+  exceeded.
 
 Overview of How it Works
 ------------------------

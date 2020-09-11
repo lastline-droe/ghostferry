@@ -124,26 +124,7 @@ func (f *Ferry) NewBinlogStreamer() *BinlogStreamer {
 
 func (f *Ferry) NewBinlogWriter() *BinlogWriter {
 	f.ensureInitialized()
-
-	return &BinlogWriter{
-		DB:               f.TargetDB,
-		DatabaseRewrites: f.Config.DatabaseRewrites,
-		TableRewrites:    f.Config.TableRewrites,
-		Throttler:        f.ReplicationThrottler,
-
-		BatchSize:          f.Config.BinlogEventBatchSize,
-		WriteRetries:       f.Config.DBWriteRetries,
-		ApplySchemaChanges: f.Config.ReplicateSchemaChanges,
-		LockStrategy:       f.Config.LockStrategy,
-
-		ErrorHandler:                f.ErrorHandler,
-		StateTracker:                f.StateTracker,
-		ForceResumeStateUpdatesToDB: f.ForceResumeStateUpdatesToDB,
-
-		CopyFilter:  f.CopyFilter,
-		TableFilter: f.TableFilter,
-		TableSchema: f.Tables,
-	}
+	return NewBinlogWriter(f)
 }
 
 func (f *Ferry) NewBinlogWriterWithoutStateTracker() *BinlogWriter {
