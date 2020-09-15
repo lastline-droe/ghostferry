@@ -52,3 +52,6 @@
 [submodule "vendor/github.com/danjacques/gofslock"]
 	path = vendor/github.com/danjacques/gofslock
 	url = https://github.com/danjacques/gofslock.git
+[submodule "vendor/github.com/uber/jaeger-client-go"]
+	path = vendor/github.com/uber/jaeger-client-go
+	url = https://github.com/uber/jaeger-client-go.git
