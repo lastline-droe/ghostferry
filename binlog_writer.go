@@ -4,6 +4,7 @@ import (
 	"fmt"
 	sql "github.com/Shopify/ghostferry/sqlwrapper"
 	"sync"
+	"time"
 
 	"github.com/siddontang/go-mysql/replication"
 	"github.com/siddontang/go-mysql/schema"
@@ -11,6 +12,16 @@ import (
 )
 
 var shutdownEvent = fmt.Errorf("binlog-writer shutting down")
+
+type BinlogWriterState string
+
+const (
+	WriterStateInit BinlogWriterState = "Init"
+	WriterStateWaitingForEvents BinlogWriterState = "WaitingForEvents"
+	WriterStateProcessingEvents BinlogWriterState = "ProcessingEvents"
+	WriterStateApplyingEvents BinlogWriterState = "ApplyingEvents"
+	WriterStateAppliedEvents BinlogWriterState = "AppliedEvents"
+)
 
 type BinlogWriter struct {
 	DB               *sql.DB
@@ -31,9 +42,39 @@ type BinlogWriter struct {
 	TableFilter TableFilter
 	TableSchema TableSchemaCache
 
+	stateRWMutex *sync.RWMutex
+	stateTS      time.Time
+	state        BinlogWriterState
+
 	queryAnalyzer     *QueryAnalyzer
 	binlogEventBuffer chan *ReplicationEvent
 	logger            *logrus.Entry
+}
+
+func NewBinlogWriter(f *Ferry) *BinlogWriter {
+	return &BinlogWriter{
+		DB:               f.TargetDB,
+		DatabaseRewrites: f.Config.DatabaseRewrites,
+		TableRewrites:    f.Config.TableRewrites,
+		Throttler:        f.ReplicationThrottler,
+
+		BatchSize:          f.Config.BinlogEventBatchSize,
+		WriteRetries:       f.Config.DBWriteRetries,
+		ApplySchemaChanges: f.Config.ReplicateSchemaChanges,
+		LockStrategy:       f.Config.LockStrategy,
+
+		ErrorHandler:                f.ErrorHandler,
+		StateTracker:                f.StateTracker,
+		ForceResumeStateUpdatesToDB: f.ForceResumeStateUpdatesToDB,
+
+		stateRWMutex: &sync.RWMutex{},
+		state:        WriterStateInit,
+		stateTS:      time.Now(),
+
+		CopyFilter:  f.CopyFilter,
+		TableFilter: f.TableFilter,
+		TableSchema: f.Tables,
+	}
 }
 
 func (b *BinlogWriter) Run() {
@@ -46,6 +87,7 @@ func (b *BinlogWriter) Run() {
 		if IncrediblyVerboseLogging {
 			b.logger.Debugf("Have %d/%d elements in batch, waiting for elements from binlog queue", len(batch), b.BatchSize)
 		}
+		b.setWriterState(WriterStateWaitingForEvents)
 
 		var replicationEvent *ReplicationEvent
 		if len(batch) == 0 {
@@ -78,6 +120,7 @@ func (b *BinlogWriter) Run() {
 		if IncrediblyVerboseLogging {
 			b.logger.Debugf("Received element from binlog queue: %v", replicationEvent)
 		}
+		b.setWriterState(WriterStateProcessingEvents)
 
 		dxlEvents, err := b.handleReplicationEvent(replicationEvent)
 		if err == shutdownEvent {
@@ -115,10 +158,28 @@ func (b *BinlogWriter) Run() {
 	}
 }
 
+func (b *BinlogWriter) setWriterState(state BinlogWriterState) {
+	b.stateRWMutex.Lock()
+	defer b.stateRWMutex.Unlock()
+
+	b.state = WriterStateWaitingForEvents
+	b.stateTS = time.Now()
+}
+
+func (b *BinlogWriter) GetWriterState() (state BinlogWriterState, stateTS time.Time) {
+	b.stateRWMutex.Lock()
+	defer b.stateRWMutex.Unlock()
+
+	return b.state, b.stateTS
+}
+
 func (b *BinlogWriter) applyBatch(batch []DXLEventWrapper) {
 	if len(batch) == 0 {
 		return
 	}
+
+	b.setWriterState(WriterStateApplyingEvents)
+	defer b.setWriterState(WriterStateAppliedEvents)
 
 	err := WithRetries(b.WriteRetries, 0, b.logger, "write events to target", func() error {
 		return b.writeEvents(batch)

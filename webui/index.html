@@ -93,6 +93,10 @@
               {{end}}
             </tr>
             <tr>
+              <th>Binlog Writer State</th>
+                <td>{{.BinlogWriterState}} {{.BinlogWriterStateTsAge}} ago (since {{.BinlogWriterStateTs}})</td>
+            </tr>
+            <tr>
               <th>Automatic Cutover Allowed</th>
               <td>{{.AutomaticCutover}}</td>
             </tr>

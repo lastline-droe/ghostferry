@@ -34,6 +34,10 @@ type StatusDeprecated struct {
 	BinlogStreamerLag       time.Duration
 	PaginationKeysPerSecond uint64
 
+	BinlogWriterState      BinlogWriterState
+	BinlogWriterStateTs    time.Time
+	BinlogWriterStateTsAge time.Duration
+
 	AutomaticCutover            bool
 	BinlogStreamerStopRequested bool
 	LastSuccessfulBinlogPos     mysql.Position
@@ -92,6 +96,12 @@ func FetchStatusDeprecated(f *Ferry, v Verifier) *StatusDeprecated {
 		status.TimeTaken = f.DoneTime.Sub(status.StartTime)
 	}
 	status.BinlogStreamerLag = time.Now().Sub(f.BinlogStreamer.lastProcessedEventTime)
+
+	status.BinlogWriterState, status.BinlogWriterStateTs = f.BinlogWriter.GetWriterState()
+	status.BinlogWriterStateTsAge = status.CurrentTime.Sub(status.BinlogWriterStateTs)
+	if status.BinlogWriterStateTsAge < 0 {
+		status.BinlogWriterStateTsAge = time.Duration(0)
+	}
 
 	status.AutomaticCutover = f.Config.AutomaticCutover
 	status.BinlogStreamerStopRequested = f.BinlogStreamer.stopRequested
