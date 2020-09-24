@@ -72,14 +72,15 @@ func (q *QueryAnalyzer) ParseSchemaChanges(sqlStatement string, schemaOfStatemen
 		// We really need to extend the parser, but we don't have the cycles
 		// right now, so we hack "support" in here - as we ignore these GRANTs
 		// anyways
-		// Same is true for PROCEDURE CREATion. This one is not as easy as
-		// grants, as we *do* care about them (they are part of the schema),
-		// but same reasoning: marking this as not supported
+		// Same is true for PROCEDURE and FUNCTION creation and dropping. This
+		// one is not as easy as grants, as we *do* care about them (they are
+		// part of the schema), but same reasoning: marking this as not supported
 		tokens := strings.SplitN(strings.TrimSpace(sqlStatement), " ", 4)
 		if len(tokens) >= 2 && strings.ToUpper(tokens[0]) == "GRANT" {
 			return schemaEvents, nil
 		}
-		if len(tokens) >= 3 && strings.ToUpper(tokens[0]) == "CREATE" && (
+		if len(tokens) >= 3 && (
+				strings.ToUpper(tokens[0]) == "CREATE" || strings.ToUpper(tokens[0]) == "DROP") && (
 				strings.ToUpper(tokens[1]) == "PROCEDURE" || strings.ToUpper(tokens[1]) == "FUNCTION" ||
 				// SQL allows an optional "DEFINER=" statement
 				strings.ToUpper(tokens[2]) == "PROCEDURE" || strings.ToUpper(tokens[2]) == "FUNCTION") {

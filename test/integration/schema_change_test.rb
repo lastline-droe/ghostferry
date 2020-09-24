@@ -252,7 +252,9 @@ class SchemaChangeIntegrationTests < GhostferryTestCase
       source_db.query("CREATE PROCEDURE test1(OUT result INT) BEGIN SELECT 1 INTO result; END")
       # unsupported 1b: CREATE PROCEDURE (using a schema name as prefix)
       source_db.query("CREATE PROCEDURE #{DEFAULT_DB}.test2(OUT result INT) BEGIN SELECT 1 INTO result; END")
-      # unsupported 2: GRANT USAGE with metadata
+      # unsupported 2: DROP PROCEDURE (not implemented in the parser at all)
+      source_db.query("DROP PROCEDURE #{DEFAULT_DB}.test2")
+      # unsupported 3: GRANT USAGE with metadata
       #source_db.query("GRANT USAGE ON #{DEFAULT_FULL_TABLE_NAME} TO 'root'@'%' WITH MAX_USER_CONNECTIONS 0 MAX_CONNECTIONS_PER_HOUR 0 MAX_QUERIES_PER_HOUR 0 MAX_UPDATES_PER_HOUR 0")
       # eventually, create a DB to be able to check if we survived schema replication
       source_db.query("CREATE TABLE #{DEFAULT_FULL_TABLE_NAME} (id bigint(20) not null, primary key(id))")
