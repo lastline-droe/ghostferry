@@ -29,11 +29,11 @@ type TLSConfig struct {
 	CertPath   string
 	ServerName string
 
-	tlsConfig *tls.Config
+	TLSConfig *tls.Config
 }
 
 func (this *TLSConfig) BuildConfig() (*tls.Config, error) {
-	if this.tlsConfig == nil {
+	if this.TLSConfig == nil {
 		certPool := x509.NewCertPool()
 		pem, err := ioutil.ReadFile(this.CertPath)
 		if err != nil {
@@ -44,13 +44,13 @@ func (this *TLSConfig) BuildConfig() (*tls.Config, error) {
 			return nil, errors.New("unable to append pem")
 		}
 
-		this.tlsConfig = &tls.Config{
+		this.TLSConfig = &tls.Config{
 			RootCAs:    certPool,
 			ServerName: this.ServerName,
 		}
 	}
 
-	return this.tlsConfig, nil
+	return this.TLSConfig, nil
 }
 
 type DatabaseConfig struct {
